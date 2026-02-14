@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FulloChat - P2P Аудиочат</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Аутентификация -->
+        <div id="authContainer" class="auth-container">
+            <h2 id="authTitle">Вход в FulloChat</h2>
+            <div id="errorMessage" class="error-message"></div>
+            <div id="successMessage" class="success-message"></div>
+            
+            <div class="input-group">
+                <input type="email" id="emailInput" placeholder="Email" autocomplete="email">
+            </div>
+            <div class="input-group">
+                <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="current-password">
+            </div>
+            
+            <button id="authButton" onclick="window.auth.handleAuth()">Войти</button>
+            <button class="secondary" id="switchAuthButton" onclick="window.auth.switchAuthMode()">Создать аккаунт</button>
+            
+            <div class="switch-text">
+                <span id="switchAuthText" onclick="window.auth.switchAuthMode()">Нет аккаунта? Зарегистрируйтесь</span>
+            </div>
+        </div>
+
+        <!-- Настройка профиля -->
+        <div id="profileContainer" class="profile-container hidden">
+            <h2>Настройка профиля</h2>
+            <div class="input-group">
+                <input type="text" id="profileNameInput" placeholder="Ваше имя" maxlength="30">
+            </div>
+            <button onclick="window.auth.saveProfile()">Сохранить и продолжить</button>
+        </div>
+
+        <!-- Управление комнатой -->
+        <div id="roomContainer" class="room-container hidden">
+            <div class="header">
+                <div class="user-info">
+                    <span id="displayName"></span>
+                    <button class="logout-btn" onclick="window.auth.logout()">Выйти</button>
+                </div>
+            </div>
+
+            <h2>Комнаты FulloChat</h2>
+            
+            <div class="input-group">
+                <input type="text" id="roomCodeInput" placeholder="Введите код комнаты" maxlength="12">
+            </div>
+            
+            <button onclick="window.room.joinRoom()">Подключиться к комнате</button>
+            <button class="secondary" onclick="window.room.createRoom()">Создать новую комнату</button>
+        </div>
+
+        <!-- Активная комната -->
+        <div id="activeRoomContainer" class="hidden">
+            <div class="header">
+                <div class="user-info">
+                    <span id="activeDisplayName"></span>
+                    <button class="logout-btn" onclick="window.room.leaveRoom()">Покинуть комнату</button>
+                </div>
+                <div class="room-info">
+                    <span class="room-id" id="currentRoomCode"></span>
+                    <button onclick="window.room.copyRoomCode()">📋 Копировать код</button>
+                </div>
+            </div>
+
+            <div class="mic-control">
+                <button id="micToggleButton" class="mic-button" onclick="window.peer.toggleMic()">
+                    🎤 Микрофон включен
+                </button>
+            </div>
+
+            <div id="participantsContainer" class="participants-grid">
+                <!-- Участники будут добавляться сюда -->
+            </div>
+
+            <div class="chat-container">
+                <div id="chatMessages" class="chat-messages"></div>
+                <div class="chat-input-container">
+                    <input type="text" id="chatInput" class="chat-input" placeholder="Введите сообщение..." onkeypress="if(event.key === 'Enter') window.peer.sendMessage()">
+                    <button class="chat-send" onclick="window.peer.sendMessage()">Отправить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+    <!-- Наши скрипты -->
+    <script src="js/firebase-config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/peer.js"></script>
+    <script src="js/room.js"></script>
+</body>
+</html>
