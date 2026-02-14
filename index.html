@@ -5,6 +5,210 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FulloChat - P2P Аудиочат</title>
     <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* Дополнительные стили для уведомлений */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 500;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .notification.success {
+            background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+        }
+
+        .notification.error {
+            background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
+        }
+
+        .notification.info {
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Стили для загрузки */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Стили для статуса микрофона */
+        .mic-button {
+            background: #48bb78;
+            margin: 20px auto;
+            padding: 15px 30px;
+            width: auto;
+            display: inline-block;
+            border: none;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .mic-button.muted {
+            background: #f56565;
+        }
+
+        .mic-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .mic-control {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        /* Стили для карточек участников */
+        .participant-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            color: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+        }
+
+        .participant-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+        }
+
+        .participant-name {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .participant-status {
+            font-size: 14px;
+            opacity: 0.9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+
+        .participant-status.muted {
+            opacity: 0.6;
+        }
+
+        /* Стили для чата */
+        .chat-messages {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            height: 250px;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .message-sender {
+            font-weight: 600;
+            color: #667eea;
+            margin-right: 10px;
+        }
+
+        .message-text {
+            color: #2d3748;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Стили для кода комнаты */
+        .room-code-display {
+            background: linear-gradient(135deg, #f6f9fc 0%, #e6f0f5 100%);
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            margin: 20px 0;
+            border: 2px dashed #667eea;
+        }
+
+        .room-code-number {
+            font-size: 36px;
+            font-weight: bold;
+            letter-spacing: 5px;
+            color: #667eea;
+            font-family: monospace;
+        }
+
+        /* Адаптивность */
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+            
+            .room-code-number {
+                font-size: 24px;
+                letter-spacing: 3px;
+            }
+            
+            .participants-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .room-info {
+                width: 100%;
+                flex-direction: column;
+            }
+            
+            .mic-button {
+                width: 100%;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -36,6 +240,7 @@
                 <input type="text" id="profileNameInput" placeholder="Ваше имя" maxlength="30">
             </div>
             <button onclick="window.auth.saveProfile()">Сохранить и продолжить</button>
+            <button class="secondary" onclick="window.auth.logout()">Выйти</button>
         </div>
 
         <!-- Управление комнатой -->
@@ -50,24 +255,33 @@
             <h2>Комнаты FulloChat</h2>
             
             <div class="input-group">
-                <input type="text" id="roomCodeInput" placeholder="Введите код комнаты" maxlength="12">
+                <input type="text" id="roomCodeInput" placeholder="Введите 12-значный код комнаты" maxlength="12" pattern="\d*">
             </div>
             
-            <button onclick="window.room.joinRoom()">Подключиться к комнате</button>
-            <button class="secondary" onclick="window.room.createRoom()">Создать новую комнату</button>
+            <button onclick="window.room.joinRoom()">🔗 Подключиться к комнате</button>
+            <button class="secondary" onclick="window.room.createRoom()">✨ Создать новую комнату</button>
+            
+            <div class="switch-text" style="margin-top: 30px;">
+                <p>Создайте комнату и поделитесь 12-значным кодом с друзьями</p>
+            </div>
         </div>
 
         <!-- Активная комната -->
         <div id="activeRoomContainer" class="hidden">
             <div class="header">
                 <div class="user-info">
-                    <span id="activeDisplayName"></span>
-                    <button class="logout-btn" onclick="window.room.leaveRoom()">Покинуть комнату</button>
+                    <span id="activeDisplayName" style="font-weight: 600; color: #667eea;"></span>
+                    <button class="logout-btn" onclick="window.room.leaveRoom()">🚪 Покинуть комнату</button>
                 </div>
                 <div class="room-info">
                     <span class="room-id" id="currentRoomCode"></span>
-                    <button onclick="window.room.copyRoomCode()">📋 Копировать код</button>
+                    <button onclick="window.room.copyRoomCode()" style="width: auto; padding: 10px 20px; background: #667eea;">📋 Копировать код</button>
                 </div>
+            </div>
+
+            <div class="room-code-display">
+                <div style="font-size: 14px; color: #718096; margin-bottom: 10px;">Код комнаты</div>
+                <div class="room-code-number" id="roomCodeDisplay"></div>
             </div>
 
             <div class="mic-control">
@@ -76,24 +290,28 @@
                 </button>
             </div>
 
+            <h3 style="margin-bottom: 15px; color: #2d3748;">Участники (<span id="participantsCount">0</span>)</h3>
             <div id="participantsContainer" class="participants-grid">
                 <!-- Участники будут добавляться сюда -->
             </div>
 
             <div class="chat-container">
+                <h3 style="margin-bottom: 15px; color: #2d3748;">Чат комнаты</h3>
                 <div id="chatMessages" class="chat-messages"></div>
                 <div class="chat-input-container">
                     <input type="text" id="chatInput" class="chat-input" placeholder="Введите сообщение..." onkeypress="if(event.key === 'Enter') window.peer.sendMessage()">
-                    <button class="chat-send" onclick="window.peer.sendMessage()">Отправить</button>
+                    <button class="chat-send" onclick="window.peer.sendMessage()">📤 Отправить</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Firebase SDKs -->
+    <!-- Firebase SDKs (compat версия) -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    
+    <!-- PeerJS для P2P соединений -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
     <!-- Наши скрипты -->
@@ -101,5 +319,101 @@
     <script src="js/auth.js"></script>
     <script src="js/peer.js"></script>
     <script src="js/room.js"></script>
+
+    <script>
+        // Глобальный обработчик ошибок
+        window.onerror = function(msg, url, line, col, error) {
+            console.error('Global error:', msg, 'at', url, 'line', line);
+            if (window.auth) {
+                window.auth.showError('Произошла ошибка: ' + msg);
+            }
+            return false;
+        };
+
+        // Проверка подключения к Firebase при загрузке
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM fully loaded');
+            
+            // Проверяем, загружен ли Firebase
+            if (typeof firebase === 'undefined') {
+                console.error('Firebase not loaded');
+                alert('Ошибка загрузки Firebase. Пожалуйста, обновите страницу.');
+            } else {
+                console.log('Firebase loaded successfully');
+            }
+        });
+
+        // Создание системы уведомлений
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideIn 0.3s reverse';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        // Переопределяем методы показа сообщений
+        window.auth.showError = function(text) {
+            showNotification(text, 'error');
+            const errorEl = document.getElementById('errorMessage');
+            if (errorEl) errorEl.textContent = text;
+        };
+
+        window.auth.showSuccess = function(text) {
+            showNotification(text, 'success');
+            const successEl = document.getElementById('successMessage');
+            if (successEl) successEl.textContent = text;
+        };
+
+        // Обновление счетчика участников
+        function updateParticipantsCount() {
+            const count = document.querySelectorAll('.participant-card').length;
+            const countEl = document.getElementById('participantsCount');
+            if (countEl) countEl.textContent = count;
+        }
+
+        // Наблюдатель за изменениями в DOM для обновления счетчика
+        const observer = new MutationObserver(function(mutations) {
+            updateParticipantsCount();
+        });
+
+        const participantsContainer = document.getElementById('participantsContainer');
+        if (participantsContainer) {
+            observer.observe(participantsContainer, { childList: true, subtree: true });
+        }
+
+        // Обновление отображения кода комнаты
+        function updateRoomCodeDisplay(code) {
+            const display = document.getElementById('roomCodeDisplay');
+            if (display) {
+                display.textContent = code;
+            }
+        }
+
+        // Перехватываем методы room для обновления отображения
+        const originalCreateRoom = window.room?.createRoom;
+        if (originalCreateRoom) {
+            window.room.createRoom = async function() {
+                await originalCreateRoom.call(this);
+                const code = document.getElementById('currentRoomCode')?.textContent;
+                if (code) updateRoomCodeDisplay(code);
+            };
+        }
+
+        const originalJoinRoom = window.room?.joinRoom;
+        if (originalJoinRoom) {
+            window.room.joinRoom = async function() {
+                await originalJoinRoom.call(this);
+                const code = document.getElementById('currentRoomCode')?.textContent;
+                if (code) updateRoomCodeDisplay(code);
+            };
+        }
+
+        console.log('FulloChat initialized');
+    </script>
 </body>
 </html>
