@@ -84,11 +84,11 @@ button.secondary:hover {
     background: #38a169;
 }
 
-button.danger {
+button.logout-btn {
     background: #f56565;
 }
 
-button.danger:hover {
+button.logout-btn:hover {
     background: #e53e3e;
 }
 
@@ -116,68 +116,6 @@ button.danger:hover {
     margin-bottom: 15px;
     text-align: center;
     font-size: 14px;
-}
-
-.room-code {
-    background: #f7fafc;
-    padding: 20px;
-    border-radius: 10px;
-    text-align: center;
-    margin: 20px 0;
-    font-size: 32px;
-    font-weight: bold;
-    letter-spacing: 5px;
-    color: #667eea;
-    border: 2px dashed #667eea;
-}
-
-.participants-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 20px;
-    margin: 20px 0;
-}
-
-.participant-card {
-    background: #f7fafc;
-    border-radius: 10px;
-    padding: 20px;
-    text-align: center;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-}
-
-.participant-name {
-    font-size: 18px;
-    font-weight: 600;
-    color: #333;
-    margin-bottom: 10px;
-}
-
-.participant-status {
-    font-size: 14px;
-    color: #48bb78;
-    margin-bottom: 10px;
-}
-
-.participant-status.muted {
-    color: #f56565;
-}
-
-.mic-control {
-    text-align: center;
-    margin: 20px 0;
-}
-
-.mic-button {
-    background: #48bb78;
-    margin-top: 10px;
-    padding: 15px 30px;
-    width: auto;
-    display: inline-block;
-}
-
-.mic-button.muted {
-    background: #f56565;
 }
 
 .header {
@@ -220,36 +158,10 @@ button.danger:hover {
     padding-top: 20px;
 }
 
-.chat-messages {
-    height: 200px;
-    overflow-y: auto;
-    background: #f7fafc;
-    border-radius: 10px;
-    padding: 15px;
-    margin-bottom: 15px;
-}
-
-.message {
-    margin-bottom: 10px;
-    padding: 10px;
-    background: white;
-    border-radius: 10px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-}
-
-.message-sender {
-    font-weight: 600;
-    color: #667eea;
-    margin-right: 10px;
-}
-
-.message-text {
-    color: #333;
-}
-
 .chat-input-container {
     display: flex;
     gap: 10px;
+    margin-top: 15px;
 }
 
 .chat-input {
@@ -268,16 +180,7 @@ button.danger:hover {
     background: #38a169;
 }
 
-.logout-btn {
-    background: #f56565;
-    padding: 10px 20px;
-    width: auto;
-}
-
-.logout-btn:hover {
-    background: #e53e3e;
-}
-
+/* Адаптивность */
 @media (max-width: 768px) {
     .container {
         padding: 20px;
@@ -293,7 +196,11 @@ button.danger:hover {
         justify-content: space-between;
     }
     
-    .participants-grid {
-        grid-template-columns: 1fr;
+    .chat-input-container {
+        flex-direction: column;
+    }
+    
+    .chat-send {
+        width: 100%;
     }
 }
