@@ -406,15 +406,30 @@ window.peer = (function() {
         pendingCandidates.clear();
         currentRoom = null;
     }
-
-    return {
-        init,
-        connectToPeer,
-        toggleMic,
-        sendMessage,
-        addMessage,
-        setCurrentRoom,
-        cleanup,
-        isMicEnabled: () => micEnabled
-    };
+// Public API
+return {
+    init,
+    connectToPeer,
+    toggleMic,
+    sendMessage,
+    addMessage,
+    setCurrentRoom,
+    cleanup,
+    closeConnection: function(userId) {
+        const pc = peerConnections.get(userId);
+        if (pc) {
+            pc.close();
+            peerConnections.delete(userId);
+        }
+        const audio = remoteAudioElements.get(userId);
+        if (audio) {
+            audio.pause();
+            audio.srcObject = null;
+            audio.remove();
+            remoteAudioElements.delete(userId);
+        }
+        console.log('Closed connection to user:', userId);
+    },
+    isMicEnabled: () => micEnabled
+};
 })();
