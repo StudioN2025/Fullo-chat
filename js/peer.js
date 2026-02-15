@@ -163,7 +163,12 @@ window.peer = (function() {
                     .add({
                         from: userId,
                         target: targetUserId,
-                        candidate: event.candidate.toJSON(),
+                        candidate: {
+                            candidate: event.candidate.candidate,
+                            sdpMid: event.candidate.sdpMid,
+                            sdpMLineIndex: event.candidate.sdpMLineIndex,
+                            usernameFragment: event.candidate.usernameFragment
+                        },
                         timestamp: firebase.firestore.FieldValue.serverTimestamp()
                     }).catch(err => console.error('Error sending ICE candidate:', err));
             }
@@ -253,14 +258,17 @@ window.peer = (function() {
             await peerConnection.setLocalDescription(answer);
             console.log('Local description set as answer');
             
-            // Send answer via Firestore
+            // Send answer via Firestore (простой объект, без toJSON)
             await db.collection('rooms').doc(currentRoom)
                 .collection('signaling')
                 .add({
                     from: userId,
                     target: fromUserId,
                     type: 'answer',
-                    answer: answer.toJSON(),
+                    answer: {
+                        type: answer.type,
+                        sdp: answer.sdp
+                    },
                     timestamp: firebase.firestore.FieldValue.serverTimestamp()
                 });
             
@@ -338,14 +346,17 @@ window.peer = (function() {
             await peerConnection.setLocalDescription(offer);
             console.log('Local description set as offer');
             
-            // Send offer via Firestore
+            // Send offer via Firestore (простой объект, без toJSON)
             await db.collection('rooms').doc(currentRoom)
                 .collection('signaling')
                 .add({
                     from: userId,
                     target: targetUserId,
                     type: 'offer',
-                    offer: offer.toJSON(),
+                    offer: {
+                        type: offer.type,
+                        sdp: offer.sdp
+                    },
                     timestamp: firebase.firestore.FieldValue.serverTimestamp()
                 });
             
@@ -415,6 +426,7 @@ window.peer = (function() {
         messageDiv.className = 'message';
         if (isOwn) {
             messageDiv.style.backgroundColor = '#e3f2fd';
+            messageDiv.style.marginLeft = '20px';
         }
         messageDiv.innerHTML = `<span class="message-sender">${sender}:</span> <span class="message-text">${message}</span>`;
         chatMessages.appendChild(messageDiv);
