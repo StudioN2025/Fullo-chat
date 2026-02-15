@@ -278,10 +278,6 @@ button.logout-btn:hover {
     box-shadow: 0 8px 15px rgba(0,0,0,0.2);
 }
 
-.participant-card.host {
-    border: 2px solid gold;
-}
-
 /* Стиль для карточки текущего пользователя */
 .participant-card.current-user {
     border: 3px solid #48bb78;
