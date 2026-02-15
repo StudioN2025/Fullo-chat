@@ -5,10 +5,10 @@ window.room = (function() {
     let roomListener = null;
     let participantsListener = null;
     let messagesListener = null;
-    let presenceInterval = null;
+    let heartbeatInterval = null;
     let isHost = false;
     let roomCheckTimeout = null;
-    let heartbeatInterval = null;
+    let connectionCheckInterval = null;
 
     // DOM Elements
     const roomCodeInput = document.getElementById('roomCodeInput');
@@ -55,7 +55,7 @@ window.room = (function() {
             currentRoom = roomRef.id;
             isHost = true;
 
-            // Add host as participant с полем online
+            // Add host as participant
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
                 userId: user.uid,
                 displayName: displayName,
@@ -71,6 +71,9 @@ window.room = (function() {
 
             // Start heartbeat
             startHeartbeat();
+
+            // Start connection checker
+            startConnectionChecker();
 
             // Update UI
             updateRoomCodeDisplay(roomCode);
@@ -117,7 +120,7 @@ window.room = (function() {
                 .get();
 
             if (roomsSnapshot.empty) {
-                window.auth.showError('Комната не найдена');
+                window.auth.showError('Комната не найдена или уже удалена');
                 return;
             }
 
@@ -139,7 +142,7 @@ window.room = (function() {
                 lastActive: firebase.firestore.FieldValue.serverTimestamp()
             });
 
-            // Add participant с полем online
+            // Add participant
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
                 userId: user.uid,
                 displayName: displayName,
@@ -155,6 +158,9 @@ window.room = (function() {
 
             // Start heartbeat
             startHeartbeat();
+
+            // Start connection checker
+            startConnectionChecker();
 
             // Update UI
             updateRoomCodeDisplay(roomCode);
@@ -174,19 +180,19 @@ window.room = (function() {
         }
     }
 
-    // Heartbeat - обновляет статус online каждые 10 секунд
+    // Heartbeat - обновляет статус online каждые 5 секунд
     function startHeartbeat() {
         const user = firebase.auth().currentUser;
         if (!user || !currentRoom) return;
 
-        // Очищаем предыдущий интервал
+        // Clear previous interval
         if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
         }
 
-        // Отправляем heartbeat каждые 10 секунд
+        // Send heartbeat every 5 seconds
         heartbeatInterval = setInterval(async () => {
-            if (currentRoom && user) {
+            if (currentRoom && user && window.navigator.onLine) {
                 try {
                     await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).update({
                         online: true,
@@ -195,38 +201,57 @@ window.room = (function() {
                     console.log('Heartbeat sent');
                 } catch (error) {
                     console.error('Error sending heartbeat:', error);
+                    if (error.code === 'permission-denied' || error.code === 'not-found') {
+                        cleanup();
+                        window.auth.showError('Соединение с комнатой потеряно');
+                    }
                 }
             } else {
                 clearInterval(heartbeatInterval);
             }
-        }, 10000);
+        }, 5000);
 
-        // Устанавливаем обработчик для выхода
+        // Set up beforeunload handler
         window.addEventListener('beforeunload', handleBeforeUnload);
         window.addEventListener('unload', handleUnload);
     }
 
+    // Check internet connection every 2 seconds
+    function startConnectionChecker() {
+        if (connectionCheckInterval) {
+            clearInterval(connectionCheckInterval);
+        }
+
+        connectionCheckInterval = setInterval(() => {
+            if (!window.navigator.onLine) {
+                console.log('Internet connection lost');
+                window.auth.showError('Потеряно соединение с интернетом');
+            }
+        }, 2000);
+    }
+
     function handleBeforeUnload() {
-        // Помечаем пользователя как офлайн перед закрытием
         const user = firebase.auth().currentUser;
         if (currentRoom && user) {
-            // Используем синхронный метод для отправки перед закрытием
-            navigator.sendBeacon(
-                `https://firestore.googleapis.com/v1/projects/${firebase.app().options.projectId}/databases/(default)/documents/rooms/${currentRoom}/participants/${user.uid}`,
-                JSON.stringify({
-                    fields: {
-                        online: { booleanValue: false },
-                        lastSeen: { timestampValue: new Date().toISOString() }
-                    }
-                })
-            );
+            const data = {
+                fields: {
+                    online: { booleanValue: false },
+                    lastSeen: { timestampValue: new Date().toISOString() }
+                }
+            };
+            
+            const url = `https://firestore.googleapis.com/v1/projects/${firebase.app().options.projectId}/databases/(default)/documents/rooms/${currentRoom}/participants/${user.uid}`;
+            
+            navigator.sendBeacon(url, JSON.stringify(data));
         }
     }
 
     function handleUnload() {
-        // Дополнительная очистка
         if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
+        }
+        if (connectionCheckInterval) {
+            clearInterval(connectionCheckInterval);
         }
     }
 
@@ -242,7 +267,13 @@ window.room = (function() {
         roomListener = db.collection('rooms').doc(currentRoom)
             .onSnapshot((doc) => {
                 if (!doc.exists) {
-                    window.auth.showError('Комната не существует');
+                    console.log('Room deleted');
+                    window.auth.showError('Комната была удалена');
+                    cleanup();
+                }
+            }, (error) => {
+                console.error('Room listener error:', error);
+                if (error.code === 'permission-denied' || error.code === 'not-found') {
                     cleanup();
                 }
             });
@@ -255,31 +286,37 @@ window.room = (function() {
         participantsListener = db.collection('rooms').doc(currentRoom)
             .collection('participants')
             .onSnapshot((snapshot) => {
-                // Фильтруем только онлайн участников для отображения
-                const onlineParticipants = snapshot.docs.filter(doc => doc.data().online === true);
-                
-                if (participantsCount) participantsCount.textContent = onlineParticipants.length;
-
-                // Проверяем на пустую комнату (нет онлайн участников)
-                checkEmptyRoom(onlineParticipants);
-
-                // Получаем текущие ID участников в UI
-                const currentUIIds = new Set();
-                document.querySelectorAll('.participant-card').forEach(card => {
-                    currentUIIds.add(card.id.replace('participant-', ''));
+                // Filter online participants (lastSeen not older than 15 seconds)
+                const now = Date.now();
+                const onlineParticipants = snapshot.docs.filter(doc => {
+                    const data = doc.data();
+                    if (!data.online) return false;
+                    
+                    if (data.lastSeen) {
+                        const lastSeen = data.lastSeen.toDate ? data.lastSeen.toDate() : new Date(data.lastSeen);
+                        const diff = now - lastSeen.getTime();
+                        return diff < 15000; // 15 seconds
+                    }
+                    return false;
                 });
 
-                // Получаем ID онлайн участников из Firebase
-                const firebaseIds = new Set(onlineParticipants.map(doc => doc.id));
+                if (participantsCount) participantsCount.textContent = onlineParticipants.length;
 
-                // Удаляем из UI тех, кто не онлайн
-                currentUIIds.forEach(id => {
-                    if (!firebaseIds.has(id)) {
-                        removeParticipantFromUI(id);
+                // Check for empty room
+                checkEmptyRoom(onlineParticipants);
+
+                // Update UI
+                const onlineIds = new Set(onlineParticipants.map(doc => doc.id));
+                
+                // Remove offline participants from UI
+                document.querySelectorAll('.participant-card').forEach(card => {
+                    const cardId = card.id.replace('participant-', '');
+                    if (!onlineIds.has(cardId)) {
+                        removeParticipantFromUI(cardId);
                     }
                 });
 
-                // Добавляем или обновляем онлайн участников
+                // Add or update online participants
                 onlineParticipants.forEach(doc => {
                     const data = doc.data();
                     if (document.getElementById(`participant-${doc.id}`)) {
@@ -289,16 +326,16 @@ window.room = (function() {
                     }
                 });
 
-                // Подключаемся к новым участникам
+                // Connect to new participants
                 onlineParticipants.forEach(doc => {
-                    const data = doc.data();
                     if (doc.id !== firebase.auth().currentUser?.uid) {
-                        // Проверяем, есть ли уже соединение
                         setTimeout(() => {
-                            window.peer.connectToPeer(doc.id, data.displayName);
+                            window.peer.connectToPeer(doc.id);
                         }, 1000);
                     }
                 });
+            }, (error) => {
+                console.error('Participants listener error:', error);
             });
     }
 
@@ -307,26 +344,25 @@ window.room = (function() {
             clearTimeout(roomCheckTimeout);
         }
 
-        // Если нет онлайн участников, удаляем комнату через 10 секунд
+        // If no online participants, delete room after 10 seconds
         if (onlineParticipants.length === 0) {
             console.log('No online participants, scheduling room deletion in 10 seconds');
             roomCheckTimeout = setTimeout(async () => {
                 if (currentRoom) {
                     try {
-                        // Проверяем еще раз перед удалением
+                        // Double-check before deleting
                         const checkSnapshot = await db.collection('rooms').doc(currentRoom)
                             .collection('participants')
                             .where('online', '==', true)
                             .get();
                         
                         if (checkSnapshot.empty) {
+                            // Delete the room
                             await db.collection('rooms').doc(currentRoom).delete();
                             console.log('Room deleted due to no online participants');
                             
-                            if (currentRoom) {
-                                cleanup();
-                                window.auth.showError('Комната удалена из-за отсутствия участников');
-                            }
+                            window.auth.showError('Комната удалена из-за отсутствия участников');
+                            cleanup();
                         }
                     } catch (error) {
                         console.error('Error deleting empty room:', error);
@@ -352,6 +388,8 @@ window.room = (function() {
                         }
                     }
                 });
+            }, (error) => {
+                console.error('Messages listener error:', error);
             });
     }
 
@@ -411,56 +449,58 @@ window.room = (function() {
         
         if (currentRoom && user) {
             try {
-                // Помечаем пользователя как офлайн (не удаляем, чтобы другие знали что он вышел)
+                // Mark user as offline
                 await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).update({
                     online: false,
                     leftAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
-                console.log('User marked as offline');
 
-                // Удаляем пользователя из массива participants в документе комнаты
+                // Remove user from participants array
                 await db.collection('rooms').doc(currentRoom).update({
                     participants: firebase.firestore.FieldValue.arrayRemove(user.uid)
                 });
-                console.log('User removed from room participants array');
+
+                // Check if any online participants remain
+                const participantsSnapshot = await db.collection('rooms').doc(currentRoom)
+                    .collection('participants')
+                    .where('online', '==', true)
+                    .get();
+
+                // If no online participants, delete the room
+                if (participantsSnapshot.empty) {
+                    await db.collection('rooms').doc(currentRoom).delete();
+                    console.log('Room deleted as last participant left');
+                }
             } catch (error) {
                 console.error('Error leaving room:', error);
             }
         }
 
-        // Очищаем интервалы
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-            heartbeatInterval = null;
-        }
-
-        // Убираем обработчики
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-        window.removeEventListener('unload', handleUnload);
+        cleanup();
     }
 
     function cleanup() {
         console.log('Cleaning up room module');
         
-        // Очищаем интервалы
+        // Clear intervals
         if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
             heartbeatInterval = null;
         }
-        if (presenceInterval) {
-            clearInterval(presenceInterval);
-            presenceInterval = null;
+        if (connectionCheckInterval) {
+            clearInterval(connectionCheckInterval);
+            connectionCheckInterval = null;
         }
         if (roomCheckTimeout) {
             clearTimeout(roomCheckTimeout);
             roomCheckTimeout = null;
         }
 
-        // Убираем обработчики
+        // Remove event listeners
         window.removeEventListener('beforeunload', handleBeforeUnload);
         window.removeEventListener('unload', handleUnload);
 
-        // Remove listeners
+        // Remove Firestore listeners
         if (roomListener) {
             roomListener();
             roomListener = null;
