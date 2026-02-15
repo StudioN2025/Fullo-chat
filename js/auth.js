@@ -89,11 +89,17 @@ window.auth = (function() {
     function showError(text) {
         errorMessage.textContent = text;
         successMessage.textContent = '';
+        if (window.showNotification) {
+            window.showNotification(text, 'error');
+        }
     }
 
     function showSuccess(text) {
         successMessage.textContent = text;
         errorMessage.textContent = '';
+        if (window.showNotification) {
+            window.showNotification(text, 'success');
+        }
     }
 
     // Switch between login and signup
@@ -200,7 +206,7 @@ window.auth = (function() {
     async function logout() {
         try {
             // Leave room if in one
-            if (window.room && window.room.currentRoom) {
+            if (window.room && window.room.getCurrentRoom()) {
                 await window.room.leaveRoom();
             }
             
