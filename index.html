@@ -299,6 +299,20 @@
             color: #1976d2;
         }
 
+        .system-message {
+            background: #f8f9fa;
+            border-left: 3px solid #6c757d;
+            font-style: italic;
+            color: #6c757d;
+            text-align: center;
+            max-width: 100%;
+            margin: 10px 0;
+        }
+
+        .system-message .message-sender {
+            color: #6c757d;
+        }
+
         @keyframes fadeIn {
             from {
                 opacity: 0;
@@ -637,6 +651,25 @@
                 updateHostControls();
             };
         }
+
+        // Очистка старых записей о киках
+        window.addEventListener('load', function() {
+            const user = firebase.auth().currentUser;
+            if (user) {
+                const keysToRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('kicked_' + user.uid)) {
+                        const kickTime = parseInt(localStorage.getItem(key));
+                        const now = Date.now();
+                        if (now - kickTime > 60000) { // 1 minute
+                            keysToRemove.push(key);
+                        }
+                    }
+                }
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+            }
+        });
 
         console.log('FulloChat initialized');
     </script>
