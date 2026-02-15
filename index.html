@@ -108,6 +108,39 @@
             border: 2px solid gold;
         }
 
+        /* Стиль для карточки текущего пользователя */
+        .participant-card.current-user {
+            border: 3px solid #48bb78;
+            box-shadow: 0 0 20px rgba(72, 187, 120, 0.5);
+            background: linear-gradient(135deg, #667eea 0%, #48bb78 100%);
+        }
+
+        .participant-card.current-user .participant-name {
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+
+        /* Анимация пульсации для статуса */
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.8;
+                transform: scale(0.98);
+            }
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .participant-status {
+            animation: pulse 2s infinite;
+            display: inline-block;
+        }
+
         .participant-name {
             font-size: 18px;
             font-weight: 600;
