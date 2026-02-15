@@ -180,6 +180,115 @@ button.logout-btn:hover {
     background: #38a169;
 }
 
+.participants-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+    margin: 20px 0;
+}
+
+/* Participant card styles (already in index.html but kept for reference) */
+.participant-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 15px;
+    padding: 20px;
+    color: white;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    transition: transform 0.3s;
+}
+
+.participant-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+}
+
+.participant-name {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.participant-status {
+    font-size: 14px;
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+.participant-controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 15px;
+    justify-content: center;
+}
+
+.mute-btn, .kick-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.3s;
+    width: auto;
+    margin: 0;
+}
+
+.mute-btn {
+    background: #ffc107;
+    color: #333;
+}
+
+.mute-btn:hover {
+    background: #e0a800;
+}
+
+.kick-btn {
+    background: #dc3545;
+    color: white;
+}
+
+.kick-btn:hover {
+    background: #c82333;
+}
+
+/* Host controls */
+.host-controls {
+    margin: 20px 0;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    border: 2px solid #ffc107;
+}
+
+.host-controls h3 {
+    color: #856404;
+    margin-bottom: 15px;
+    font-size: 16px;
+}
+
+.host-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.delete-room-btn {
+    background: #dc3545;
+    color: white;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s;
+    width: auto;
+    margin: 0;
+}
+
+.delete-room-btn:hover {
+    background: #c82333;
+}
+
 /* Адаптивность */
 @media (max-width: 768px) {
     .container {
@@ -203,4 +312,44 @@ button.logout-btn:hover {
     .chat-send {
         width: 100%;
     }
+    
+    .participants-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .participant-controls {
+        flex-direction: column;
+    }
+    
+    .mute-btn, .kick-btn {
+        width: 100%;
+    }
+    
+    .host-buttons {
+        flex-direction: column;
+    }
+    
+    .delete-room-btn {
+        width: 100%;
+    }
+}
+
+/* Стили для скроллбара */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #667eea;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #5a67d8;
 }
