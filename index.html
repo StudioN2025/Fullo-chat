@@ -255,18 +255,11 @@
         console.log('FulloChat initialized');
     </script>
 
-    <!-- Дополнительная защита от закрытия страницы -->
+    <!-- Только реальное закрытие страницы -->
     <script>
     window.addEventListener('pagehide', function() {
         if (window.room && window.room.getCurrentRoom()) {
             console.log('Page hidden, leaving room');
-            window.room.leaveRoom();
-        }
-    });
-
-    window.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'hidden' && window.room && window.room.getCurrentRoom()) {
-            console.log('Tab hidden, leaving room');
             window.room.leaveRoom();
         }
     });
@@ -279,9 +272,11 @@
             if (roomId && user) {
                 localStorage.setItem('lastRoom_' + user.uid, roomId);
             }
+            window.room.leaveRoom();
         }
     });
 
+    // Восстановление после неожиданного закрытия
     window.addEventListener('load', function() {
         const user = firebase.auth().currentUser;
         if (user) {
