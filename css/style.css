@@ -187,7 +187,7 @@ button.logout-btn:hover {
     margin: 20px 0;
 }
 
-/* Participant card styles (already in index.html but kept for reference) */
+/* Participant card styles */
 .participant-card {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border-radius: 15px;
@@ -200,6 +200,39 @@ button.logout-btn:hover {
 .participant-card:hover {
     transform: translateY(-5px);
     box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+}
+
+/* Стиль для карточки текущего пользователя */
+.participant-card.current-user {
+    border: 3px solid #48bb78;
+    box-shadow: 0 0 20px rgba(72, 187, 120, 0.5);
+    background: linear-gradient(135deg, #667eea 0%, #48bb78 100%);
+}
+
+.participant-card.current-user .participant-name {
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+/* Анимация пульсации для статуса */
+@keyframes pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.8;
+        transform: scale(0.98);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.participant-status {
+    animation: pulse 2s infinite;
+    display: inline-block;
 }
 
 .participant-name {
