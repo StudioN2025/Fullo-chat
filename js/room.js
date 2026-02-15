@@ -5,7 +5,9 @@ window.room = (function() {
     let roomListener = null;
     let participantsListener = null;
     let messagesListener = null;
+    let presenceListener = null;
     let isHost = false;
+    let roomCheckTimeout = null;
 
     // DOM Elements
     const roomCodeInput = document.getElementById('roomCodeInput');
@@ -45,7 +47,8 @@ window.room = (function() {
                 hostName: displayName,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 participants: [user.uid],
-                active: true
+                active: true,
+                lastActive: firebase.firestore.FieldValue.serverTimestamp()
             });
 
             currentRoom = roomRef.id;
@@ -57,12 +60,16 @@ window.room = (function() {
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 online: true,
-                isHost: true
+                isHost: true,
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
             });
 
             // Initialize WebRTC
             await window.peer.init(user.uid, displayName);
             window.peer.setCurrentRoom(currentRoom);
+
+            // Set up presence
+            setupPresence();
 
             // Update UI
             updateRoomCodeDisplay(roomCode);
@@ -127,7 +134,8 @@ window.room = (function() {
 
             // Add to room
             await db.collection('rooms').doc(currentRoom).update({
-                participants: firebase.firestore.FieldValue.arrayUnion(user.uid)
+                participants: firebase.firestore.FieldValue.arrayUnion(user.uid),
+                lastActive: firebase.firestore.FieldValue.serverTimestamp()
             });
 
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
@@ -135,12 +143,16 @@ window.room = (function() {
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 online: true,
-                isHost: false
+                isHost: false,
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
             });
 
             // Initialize WebRTC
             await window.peer.init(user.uid, displayName);
             window.peer.setCurrentRoom(currentRoom);
+
+            // Set up presence
+            setupPresence();
 
             // Update UI
             updateRoomCodeDisplay(roomCode);
@@ -160,6 +172,40 @@ window.room = (function() {
         }
     }
 
+    // Setup presence monitoring
+    function setupPresence() {
+        const user = firebase.auth().currentUser;
+        if (!user || !currentRoom) return;
+
+        // Update presence every 30 seconds
+        const presenceInterval = setInterval(() => {
+            if (currentRoom && user) {
+                db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid)
+                    .update({
+                        online: true,
+                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                    })
+                    .catch(err => console.error('Error updating presence:', err));
+            } else {
+                clearInterval(presenceInterval);
+            }
+        }, 30000);
+
+        // Set up beforeunload handler
+        window.addEventListener('beforeunload', function() {
+            if (currentRoom && user) {
+                db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid)
+                    .update({
+                        online: false,
+                        leftAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+            }
+        });
+
+        // Store interval for cleanup
+        presenceListener = presenceInterval;
+    }
+
     function updateRoomCodeDisplay(code) {
         if (currentRoomCode) currentRoomCode.textContent = code;
         if (roomCodeDisplay) roomCodeDisplay.textContent = code;
@@ -171,7 +217,10 @@ window.room = (function() {
 
         roomListener = db.collection('rooms').doc(currentRoom)
             .onSnapshot((doc) => {
-                if (!doc.exists || !doc.data().active) {
+                if (!doc.exists) {
+                    window.auth.showError('Комната не существует');
+                    leaveRoom();
+                } else if (!doc.data().active) {
                     window.auth.showError('Комната закрыта');
                     leaveRoom();
                 }
@@ -186,6 +235,9 @@ window.room = (function() {
             .collection('participants')
             .onSnapshot((snapshot) => {
                 if (participantsCount) participantsCount.textContent = snapshot.size;
+
+                // Check for empty room
+                checkEmptyRoom(snapshot);
 
                 snapshot.docChanges().forEach((change) => {
                     const data = change.doc.data();
@@ -211,6 +263,40 @@ window.room = (function() {
             });
     }
 
+    function checkEmptyRoom(snapshot) {
+        // Clear previous timeout
+        if (roomCheckTimeout) {
+            clearTimeout(roomCheckTimeout);
+        }
+
+        // Check if room is empty (no online participants except maybe current user)
+        let onlineCount = 0;
+        snapshot.docs.forEach(doc => {
+            if (doc.data().online) {
+                onlineCount++;
+            }
+        });
+
+        // If no online participants, schedule room deletion
+        if (onlineCount === 0) {
+            console.log('Room empty, scheduling deletion in 5 seconds');
+            roomCheckTimeout = setTimeout(async () => {
+                if (currentRoom) {
+                    try {
+                        await db.collection('rooms').doc(currentRoom).update({
+                            active: false,
+                            closedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                            closedReason: 'empty'
+                        });
+                        console.log('Room closed due to inactivity');
+                    } catch (error) {
+                        console.error('Error closing empty room:', error);
+                    }
+                }
+            }, 5000);
+        }
+    }
+
     function listenToMessages() {
         if (!currentRoom) return;
         if (messagesListener) messagesListener();
@@ -222,8 +308,9 @@ window.room = (function() {
                 snapshot.docChanges().forEach((change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
+                        // Only add message if it's not from current user
                         if (data.senderId !== firebase.auth().currentUser?.uid) {
-                            addMessageToUI(data.senderName, data.message);
+                            window.peer.addMessage(data.senderName, data.message);
                         }
                     }
                 });
@@ -272,16 +359,6 @@ window.room = (function() {
         if (card) card.remove();
     }
 
-    function addMessageToUI(sender, message) {
-        if (!chatMessages) return;
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message';
-        messageDiv.innerHTML = `<span class="message-sender">${sender}:</span> <span class="message-text">${message}</span>`;
-        chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
     function copyRoomCode() {
         if (!roomCode) return;
         navigator.clipboard.writeText(roomCode)
@@ -294,19 +371,28 @@ window.room = (function() {
         
         if (currentRoom && user) {
             try {
+                // Update participant status
                 await db.collection('rooms').doc(currentRoom)
                     .collection('participants').doc(user.uid)
-                    .update({ online: false });
+                    .update({ 
+                        online: false,
+                        leftAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
 
+                // Remove from room participants array
                 await db.collection('rooms').doc(currentRoom).update({
                     participants: firebase.firestore.FieldValue.arrayRemove(user.uid)
                 });
 
+                // Check if room is empty
                 const roomDoc = await db.collection('rooms').doc(currentRoom).get();
                 if (roomDoc.exists) {
                     const participants = roomDoc.data().participants || [];
                     if (participants.length === 0) {
-                        await db.collection('rooms').doc(currentRoom).update({ active: false });
+                        await db.collection('rooms').doc(currentRoom).update({ 
+                            active: false,
+                            closedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
                     }
                 }
             } catch (error) {
@@ -315,18 +401,49 @@ window.room = (function() {
         }
 
         // Cleanup
-        if (roomListener) roomListener();
-        if (participantsListener) participantsListener();
-        if (messagesListener) messagesListener();
-        
-        window.peer.cleanup();
+        cleanup();
+    }
 
+    function cleanup() {
+        // Clear presence interval
+        if (presenceListener) {
+            clearInterval(presenceListener);
+            presenceListener = null;
+        }
+
+        // Clear room check timeout
+        if (roomCheckTimeout) {
+            clearTimeout(roomCheckTimeout);
+            roomCheckTimeout = null;
+        }
+
+        // Remove listeners
+        if (roomListener) {
+            roomListener();
+            roomListener = null;
+        }
+        if (participantsListener) {
+            participantsListener();
+            participantsListener = null;
+        }
+        if (messagesListener) {
+            messagesListener();
+            messagesListener = null;
+        }
+        
+        // Cleanup WebRTC
+        if (window.peer && typeof window.peer.cleanup === 'function') {
+            window.peer.cleanup();
+        }
+
+        // Clear UI
         if (participantsContainer) participantsContainer.innerHTML = '';
         if (chatMessages) chatMessages.innerHTML = '';
         
         currentRoom = null;
         roomCode = null;
 
+        // Show room container
         if (roomContainer) roomContainer.classList.remove('hidden');
         if (activeRoomContainer) activeRoomContainer.classList.add('hidden');
         
