@@ -404,7 +404,7 @@
             };
         }
 
-        const originalJoinRoom = window.room?.joinRoom;
+                const originalJoinRoom = window.room?.joinRoom;
         if (originalJoinRoom) {
             window.room.joinRoom = async function() {
                 await originalJoinRoom.call(this);
@@ -414,6 +414,51 @@
         }
 
         console.log('FulloChat initialized');
+    </script>
+
+    <!-- Дополнительная защита от закрытия страницы -->
+    <script>
+    window.addEventListener('pagehide', function() {
+        if (window.room && window.room.getCurrentRoom()) {
+            console.log('Page hidden, leaving room');
+            window.room.leaveRoom();
+        }
+    });
+
+    window.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden' && window.room && window.room.getCurrentRoom()) {
+            console.log('Tab hidden, leaving room');
+            window.room.leaveRoom();
+        }
+    });
+
+    // Также добавляем обработчик перед выгрузкой страницы
+    window.addEventListener('beforeunload', function() {
+        if (window.room && window.room.getCurrentRoom()) {
+            console.log('Page unloading, leaving room');
+            // Не вызываем асинхронную функцию, просто помечаем в localStorage
+            const roomId = window.room.getCurrentRoom();
+            if (roomId) {
+                localStorage.setItem('lastRoom_' + firebase.auth().currentUser?.uid, roomId);
+            }
+        }
+    });
+
+    // При загрузке проверяем, не остались ли мы в комнате
+    window.addEventListener('load', function() {
+        const user = firebase.auth().currentUser;
+        if (user) {
+            const lastRoom = localStorage.getItem('lastRoom_' + user.uid);
+            if (lastRoom) {
+                localStorage.removeItem('lastRoom_' + user.uid);
+                // Если мы все еще в комнате по мнению Firebase, выходим
+                db.collection('rooms').doc(lastRoom).collection('participants').doc(user.uid).update({
+                    online: false,
+                    leftAt: firebase.firestore.FieldValue.serverTimestamp()
+                }).catch(() => {});
+            }
+        }
+    });
     </script>
 </body>
 </html>
