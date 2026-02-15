@@ -140,7 +140,7 @@ window.peer = (function() {
 
         // Handle ICE candidates
         pc.onicecandidate = (event) => {
-            if (event.candidate) {
+            if (event.candidate && currentRoom && userId) {
                 console.log('Generated ICE candidate for:', targetUserId);
                 db.collection('rooms').doc(currentRoom)
                     .collection('iceCandidates')
@@ -153,7 +153,7 @@ window.peer = (function() {
                             sdpMLineIndex: event.candidate.sdpMLineIndex
                         },
                         timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                    }).catch(console.error);
+                    }).catch(err => console.error('Error sending ICE candidate:', err));
             }
         };
 
@@ -199,6 +199,11 @@ window.peer = (function() {
 
     // Handle offer
     async function handleOffer(fromUserId, offerObj) {
+        if (!currentRoom || !userId) {
+            console.log('No room or user, ignoring offer');
+            return;
+        }
+        
         console.log('Handling offer from:', fromUserId);
         
         try {
@@ -381,6 +386,22 @@ window.peer = (function() {
         }
     }
 
+    function closeConnection(userId) {
+        const pc = peerConnections.get(userId);
+        if (pc) {
+            pc.close();
+            peerConnections.delete(userId);
+        }
+        const audio = remoteAudioElements.get(userId);
+        if (audio) {
+            audio.pause();
+            audio.srcObject = null;
+            audio.remove();
+            remoteAudioElements.delete(userId);
+        }
+        console.log('Closed connection to user:', userId);
+    }
+
     function cleanup() {
         console.log('Cleaning up WebRTC connections');
         
@@ -405,31 +426,19 @@ window.peer = (function() {
         
         pendingCandidates.clear();
         currentRoom = null;
+        userId = null;
     }
-// Public API
-return {
-    init,
-    connectToPeer,
-    toggleMic,
-    sendMessage,
-    addMessage,
-    setCurrentRoom,
-    cleanup,
-    closeConnection: function(userId) {
-        const pc = peerConnections.get(userId);
-        if (pc) {
-            pc.close();
-            peerConnections.delete(userId);
-        }
-        const audio = remoteAudioElements.get(userId);
-        if (audio) {
-            audio.pause();
-            audio.srcObject = null;
-            audio.remove();
-            remoteAudioElements.delete(userId);
-        }
-        console.log('Closed connection to user:', userId);
-    },
-    isMicEnabled: () => micEnabled
-};
+
+    // Public API
+    return {
+        init,
+        connectToPeer,
+        toggleMic,
+        sendMessage,
+        addMessage,
+        setCurrentRoom,
+        closeConnection,
+        cleanup,
+        isMicEnabled: () => micEnabled
+    };
 })();
