@@ -541,43 +541,59 @@ window.room = (function() {
                 if (leaveInProgress) return;
                 
                 const now = Date.now();
+                const currentUserId = firebase.auth().currentUser?.uid;
+                
+                // Filter online participants
                 const onlineParticipants = snapshot.docs.filter(doc => {
                     const data = doc.data();
+                    
+                    // Current user always online
+                    if (doc.id === currentUserId) {
+                        return true;
+                    }
+                    
                     if (!data.online) return false;
                     
                     if (data.lastSeen) {
                         const lastSeen = data.lastSeen.toDate ? data.lastSeen.toDate() : new Date(data.lastSeen);
                         const diff = now - lastSeen.getTime();
-                        return diff < 5000;
+                        return diff < 5000; // 5 seconds
                     }
                     return false;
                 });
 
                 if (participantsCount) participantsCount.textContent = onlineParticipants.length;
 
-                // Check for empty room
-                checkEmptyRoom(snapshot.docs);
+                // Check for empty room (excluding current user)
+                const otherParticipants = onlineParticipants.filter(p => p.id !== currentUserId);
+                checkEmptyRoom(otherParticipants);
 
+                // Get online IDs
                 const onlineIds = new Set(onlineParticipants.map(doc => doc.id));
                 
+                // Remove from UI only those not online AND not current user
                 document.querySelectorAll('.participant-card').forEach(card => {
                     const cardId = card.id.replace('participant-', '');
-                    if (!onlineIds.has(cardId)) {
+                    if (!onlineIds.has(cardId) && cardId !== currentUserId) {
                         removeParticipantFromUI(cardId);
                     }
                 });
 
+                // Add or update online participants
                 onlineParticipants.forEach(doc => {
                     const data = doc.data();
-                    if (document.getElementById(`participant-${doc.id}`)) {
+                    const card = document.getElementById(`participant-${doc.id}`);
+                    
+                    if (card) {
                         updateParticipantInUI(doc.id, data);
                     } else {
                         addParticipantToUI(doc.id, data);
                     }
                 });
 
+                // Connect to new participants (not self)
                 onlineParticipants.forEach(doc => {
-                    if (doc.id !== firebase.auth().currentUser?.uid) {
+                    if (doc.id !== currentUserId) {
                         setTimeout(() => {
                             window.peer.connectToPeer(doc.id);
                         }, 1000);
@@ -588,14 +604,14 @@ window.room = (function() {
             });
     }
 
-    function checkEmptyRoom(allParticipants) {
+    function checkEmptyRoom(otherParticipants) {
         if (roomCheckTimeout) {
             clearTimeout(roomCheckTimeout);
         }
 
-        // Only delete if there are NO participants at all
-        if (allParticipants.length === 0) {
-            console.log('Room has no participants, scheduling deletion in 5 seconds');
+        // Only delete if there are NO other participants
+        if (otherParticipants.length === 0) {
+            console.log('Room has no other participants, scheduling deletion in 5 seconds');
             roomCheckTimeout = setTimeout(async () => {
                 if (currentRoom) {
                     try {
@@ -603,9 +619,10 @@ window.room = (function() {
                             .collection('participants')
                             .get();
                         
-                        if (checkSnapshot.empty) {
+                        // If only current user remains, delete room
+                        if (checkSnapshot.size <= 1) {
                             await db.collection('rooms').doc(currentRoom).delete();
-                            console.log('Room deleted - no participants');
+                            console.log('Room deleted - no other participants');
                             
                             if (!leaveInProgress) {
                                 window.auth.showError('Комната удалена');
@@ -636,11 +653,9 @@ window.room = (function() {
                         
                         // Handle system messages
                         if (data.type === 'kick' && data.targetUserId === currentUser?.uid) {
-                            // This is a kick message targeting us
                             console.log('Kick message received');
                             forceLeave();
                         } else if (data.type === 'room_deleted') {
-                            // Room was deleted by host
                             console.log('Room deleted message received');
                             forceLeave();
                         } else if (data.senderId !== firebase.auth().currentUser?.uid) {
@@ -656,6 +671,8 @@ window.room = (function() {
 
     function addParticipantToUI(userId, data) {
         if (!participantsContainer) return;
+        
+        // Check if already exists
         if (document.getElementById(`participant-${userId}`)) return;
 
         const card = document.createElement('div');
@@ -665,6 +682,11 @@ window.room = (function() {
         const isCurrentUser = userId === firebase.auth().currentUser?.uid;
         const hostBadge = data.isHost ? ' 👑' : '';
         const mutedIcon = data.muted ? ' 🔇' : '';
+        
+        // Add special class for current user
+        if (isCurrentUser) {
+            card.classList.add('current-user');
+        }
         
         let controls = '';
         if (isHost && !isCurrentUser && data.isHost === false) {
