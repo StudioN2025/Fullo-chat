@@ -6,17 +6,24 @@ window.room = (function() {
     let participantsListener = null;
     let messagesListener = null;
     let myPeerId = null;
+    let isHost = false;
 
     // DOM Elements
     const roomCodeInput = document.getElementById('roomCodeInput');
     const currentRoomCode = document.getElementById('currentRoomCode');
     const participantsContainer = document.getElementById('participantsContainer');
     const chatMessages = document.getElementById('chatMessages');
+    const roomCodeDisplay = document.getElementById('roomCodeDisplay');
+    const activeDisplayName = document.getElementById('activeDisplayName');
+    const participantsCount = document.getElementById('participantsCount');
 
     // Create new room
     async function createRoom() {
         const user = firebase.auth().currentUser;
-        if (!user) return;
+        if (!user) {
+            window.auth.showError('Пользователь не авторизован');
+            return;
+        }
 
         // Generate 12-digit room code
         roomCode = generateRoomCode();
@@ -24,6 +31,12 @@ window.room = (function() {
         try {
             // Get user's display name
             const userDoc = await db.collection('users').doc(user.uid).get();
+            
+            if (!userDoc.exists) {
+                window.auth.showError('Профиль пользователя не найден');
+                return;
+            }
+            
             const displayName = userDoc.data().displayName;
 
             // Create room in Firestore
@@ -33,17 +46,22 @@ window.room = (function() {
                 hostName: displayName,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 participants: [user.uid],
-                active: true
+                active: true,
+                createdBy: user.uid,
+                createdAt_server: firebase.firestore.FieldValue.serverTimestamp()
             });
 
             currentRoom = roomRef.id;
+            isHost = true;
 
             // Add host as participant
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
                 userId: user.uid,
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                online: true
+                online: true,
+                isHost: true,
+                peerId: myPeerId || ''
             });
 
             // Initialize PeerJS
@@ -51,7 +69,10 @@ window.room = (function() {
             window.peer.setCurrentRoom(currentRoom);
 
             // Update UI
-            currentRoomCode.textContent = roomCode;
+            updateRoomCodeDisplay(roomCode);
+            if (activeDisplayName) {
+                activeDisplayName.textContent = displayName;
+            }
             window.auth.showActiveRoom();
             
             // Start listening for participants
@@ -62,7 +83,7 @@ window.room = (function() {
             window.auth.showSuccess(`Комната создана! Код: ${roomCode}`);
         } catch (error) {
             console.error('Error creating room:', error);
-            window.auth.showError('Ошибка создания комнаты');
+            window.auth.showError('Ошибка создания комнаты: ' + error.message);
         }
     }
 
@@ -85,9 +106,14 @@ window.room = (function() {
         }
 
         const user = firebase.auth().currentUser;
-        if (!user) return;
+        if (!user) {
+            window.auth.showError('Пользователь не авторизован');
+            return;
+        }
 
         try {
+            window.auth.showSuccess('Поиск комнаты...');
+            
             // Find room by code
             const roomsSnapshot = await db.collection('rooms')
                 .where('code', '==', code)
@@ -102,21 +128,31 @@ window.room = (function() {
             const roomDoc = roomsSnapshot.docs[0];
             currentRoom = roomDoc.id;
             roomCode = code;
+            isHost = false;
 
             // Get user's display name
             const userDoc = await db.collection('users').doc(user.uid).get();
+            
+            if (!userDoc.exists) {
+                window.auth.showError('Профиль пользователя не найден');
+                return;
+            }
+            
             const displayName = userDoc.data().displayName;
 
-            // Add user to room participants
+            // Add user to room participants array
             await db.collection('rooms').doc(currentRoom).update({
                 participants: firebase.firestore.FieldValue.arrayUnion(user.uid)
             });
 
+            // Add user to participants subcollection
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
                 userId: user.uid,
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                online: true
+                online: true,
+                isHost: false,
+                peerId: ''
             });
 
             // Initialize PeerJS
@@ -124,7 +160,10 @@ window.room = (function() {
             window.peer.setCurrentRoom(currentRoom);
 
             // Update UI
-            currentRoomCode.textContent = roomCode;
+            updateRoomCodeDisplay(roomCode);
+            if (activeDisplayName) {
+                activeDisplayName.textContent = displayName;
+            }
             window.auth.showActiveRoom();
 
             // Start listening
@@ -135,49 +174,93 @@ window.room = (function() {
             window.auth.showSuccess('Подключение к комнате выполнено');
         } catch (error) {
             console.error('Error joining room:', error);
-            window.auth.showError('Ошибка подключения к комнате');
+            window.auth.showError('Ошибка подключения к комнате: ' + error.message);
+        }
+    }
+
+    // Update room code display
+    function updateRoomCodeDisplay(code) {
+        if (currentRoomCode) {
+            currentRoomCode.textContent = code;
+        }
+        if (roomCodeDisplay) {
+            roomCodeDisplay.textContent = code;
         }
     }
 
     // Listen to room changes
     function listenToRoom() {
-        if (roomListener) roomListener();
+        if (!currentRoom) return;
+        
+        if (roomListener) {
+            roomListener();
+        }
 
         roomListener = db.collection('rooms').doc(currentRoom)
             .onSnapshot((doc) => {
-                if (!doc.exists || !doc.data().active) {
-                    // Room was closed
-                    window.auth.showError('Комната закрыта');
+                if (!doc.exists) {
+                    window.auth.showError('Комната не существует');
                     leaveRoom();
+                } else {
+                    const data = doc.data();
+                    if (!data.active) {
+                        window.auth.showError('Комната закрыта');
+                        leaveRoom();
+                    }
                 }
+            }, (error) => {
+                console.error('Room listener error:', error);
+                // Don't show error to user, just log it
             });
     }
 
     // Listen to participants
     function listenToParticipants() {
-        if (participantsListener) participantsListener();
+        if (!currentRoom) return;
+        
+        if (participantsListener) {
+            participantsListener();
+        }
 
         participantsListener = db.collection('rooms').doc(currentRoom)
             .collection('participants')
             .onSnapshot((snapshot) => {
+                // Update participants count
+                if (participantsCount) {
+                    participantsCount.textContent = snapshot.size;
+                }
+
                 snapshot.docChanges().forEach((change) => {
+                    const participantData = change.doc.data();
+                    
                     if (change.type === 'added') {
-                        addParticipantToUI(change.doc.id, change.doc.data());
-                        connectToNewParticipant(change.doc.id, change.doc.data());
+                        addParticipantToUI(change.doc.id, participantData);
+                        // Only connect to new participants if they're not the current user
+                        if (change.doc.id !== firebase.auth().currentUser?.uid) {
+                            connectToNewParticipant(change.doc.id, participantData);
+                        }
                     }
+                    
                     if (change.type === 'modified') {
-                        updateParticipantInUI(change.doc.id, change.doc.data());
+                        updateParticipantInUI(change.doc.id, participantData);
                     }
+                    
                     if (change.type === 'removed') {
                         removeParticipantFromUI(change.doc.id);
                     }
                 });
+            }, (error) => {
+                console.error('Participants listener error:', error);
             });
     }
 
     // Listen to messages
     function listenToMessages() {
-        if (messagesListener) messagesListener();
+        if (!currentRoom) return;
+        
+        if (messagesListener) {
+            messagesListener();
+        }
 
         messagesListener = db.collection('rooms').doc(currentRoom)
             .collection('messages')
@@ -186,14 +269,21 @@ window.room = (function() {
                 snapshot.docChanges().forEach((change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
-                        addMessageToUI(data.senderName, data.message);
+                        // Don't add own messages twice
+                        if (data.senderId !== firebase.auth().currentUser?.uid) {
+                            addMessageToUI(data.senderName, data.message);
+                        }
                     }
                 });
+            }, (error) => {
+                console.error('Messages listener error:', error);
             });
     }
 
     // Add participant to UI
     function addParticipantToUI(userId, data) {
+        if (!participantsContainer) return;
+        
         // Check if already exists
         if (document.getElementById(`participant-${userId}`)) return;
 
@@ -201,13 +291,20 @@ window.room = (function() {
         card.className = 'participant-card';
         card.id = `participant-${userId}`;
         
-        const isCurrentUser = userId === firebase.auth().currentUser.uid;
+        const isCurrentUser = userId === firebase.auth().currentUser?.uid;
         const statusText = data.online ? '🔊 В сети' : '📴 Не в сети';
         const statusClass = data.online ? '' : 'muted';
+        const hostBadge = data.isHost ? ' 👑' : '';
         
         card.innerHTML = `
-            <div class="participant-name">${data.displayName} ${isCurrentUser ? '(Вы)' : ''}</div>
-            <div class="participant-status ${statusClass}">${statusText}</div>
+            <div class="participant-name">
+                ${data.displayName || 'Unknown'}${hostBadge}
+                ${isCurrentUser ? '<span style="font-size: 12px; color: #667eea;"> (Вы)</span>' : ''}
+            </div>
+            <div class="participant-status ${statusClass}">
+                ${statusText}
+                ${data.muted ? ' 🔇' : ''}
+            </div>
         `;
 
         participantsContainer.appendChild(card);
@@ -220,6 +317,9 @@ window.room = (function() {
             if (statusDiv) {
                 statusDiv.textContent = data.online ? '🔊 В сети' : '📴 Не в сети';
                 statusDiv.classList.toggle('muted', !data.online);
+                if (data.muted) {
+                    statusDiv.textContent += ' 🔇';
+                }
             }
         }
     }
@@ -232,6 +332,8 @@ window.room = (function() {
     }
 
     function addMessageToUI(sender, message) {
+        if (!chatMessages) return;
+        
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message';
         messageDiv.innerHTML = `<span class="message-sender">${sender}:</span> <span class="message-text">${message}</span>`;
@@ -241,19 +343,24 @@ window.room = (function() {
 
     // Connect to new participant via PeerJS
     function connectToNewParticipant(userId, data) {
-        if (userId === firebase.auth().currentUser.uid) return;
         if (!data.peerId) return;
-
-        // Connect via PeerJS
-        window.peer.connectToPeer(data.peerId, userId);
+        
+        // Check if we already have a connection
+        if (window.peer && typeof window.peer.connectToPeer === 'function') {
+            console.log('Connecting to new participant:', userId, 'with peerId:', data.peerId);
+            window.peer.connectToPeer(data.peerId, userId);
+        }
     }
 
     // Copy room code to clipboard
     function copyRoomCode() {
+        if (!roomCode) return;
+        
         navigator.clipboard.writeText(roomCode).then(() => {
-            window.auth.showSuccess('Код скопирован!');
-        }).catch(() => {
-            window.auth.showError('Ошибка копирования');
+            window.auth.showSuccess('Код скопирован в буфер обмена!');
+        }).catch((err) => {
+            console.error('Error copying to clipboard:', err);
+            window.auth.showError('Ошибка копирования кода');
         });
     }
 
@@ -276,16 +383,20 @@ window.room = (function() {
                     participants: firebase.firestore.FieldValue.arrayRemove(user.uid)
                 });
 
-                // Check if room is empty
+                // Check if room is empty and user is host
                 const roomDoc = await db.collection('rooms').doc(currentRoom).get();
-                const participants = roomDoc.data().participants || [];
-                
-                if (participants.length === 0) {
-                    // Close the room
-                    await db.collection('rooms').doc(currentRoom).update({
-                        active: false,
-                        closedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                if (roomDoc.exists) {
+                    const roomData = roomDoc.data();
+                    const participants = roomData.participants || [];
+                    
+                    // If room is empty or host is leaving and no other participants, close the room
+                    if (participants.length === 0 || (roomData.hostId === user.uid && participants.length === 1)) {
+                        await db.collection('rooms').doc(currentRoom).update({
+                            active: false,
+                            closedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                            closedBy: user.uid
+                        });
+                    }
                 }
             } catch (error) {
                 console.error('Error leaving room:', error);
@@ -307,18 +418,54 @@ window.room = (function() {
         }
 
         // Clean up PeerJS
-        window.peer.cleanup();
+        if (window.peer && typeof window.peer.cleanup === 'function') {
+            window.peer.cleanup();
+        }
 
         // Clear UI
-        participantsContainer.innerHTML = '';
-        chatMessages.innerHTML = '';
+        if (participantsContainer) {
+            participantsContainer.innerHTML = '';
+        }
+        if (chatMessages) {
+            chatMessages.innerHTML = '';
+        }
         
+        // Reset room variables
         currentRoom = null;
         roomCode = null;
+        isHost = false;
+        myPeerId = null;
 
         // Show room container
-        document.getElementById('roomContainer').classList.remove('hidden');
-        document.getElementById('activeRoomContainer').classList.add('hidden');
+        const roomContainer = document.getElementById('roomContainer');
+        const activeRoomContainer = document.getElementById('activeRoomContainer');
+        
+        if (roomContainer) {
+            roomContainer.classList.remove('hidden');
+        }
+        if (activeRoomContainer) {
+            activeRoomContainer.classList.add('hidden');
+        }
+        
+        window.auth.showSuccess('Вы покинули комнату');
+        
+        // Clear room code input
+        if (roomCodeInput) {
+            roomCodeInput.value = '';
+        }
+    }
+
+    // Get current room info
+    function getCurrentRoom() {
+        return currentRoom;
+    }
+
+    function getRoomCode() {
+        return roomCode;
+    }
+
+    function isCurrentUserHost() {
+        return isHost;
     }
 
     // Public API
@@ -327,6 +474,8 @@ window.room = (function() {
         joinRoom,
         leaveRoom,
         copyRoomCode,
-        currentRoom: () => currentRoom
+        getCurrentRoom,
+        getRoomCode,
+        isCurrentUserHost
     };
 })();
