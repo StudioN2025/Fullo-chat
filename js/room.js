@@ -11,6 +11,7 @@ window.room = (function() {
     let connectionCheckInterval = null;
     let leaveInProgress = false;
     let currentUser = null;
+    let kickedListener = null;
 
     // DOM Elements
     const roomCodeInput = document.getElementById('roomCodeInput');
@@ -82,6 +83,9 @@ window.room = (function() {
 
             // Start connection checker
             startConnectionChecker();
+
+            // Listen for kick
+            listenForKick();
 
             // Update UI
             updateRoomCodeDisplay(roomCode);
@@ -181,6 +185,9 @@ window.room = (function() {
             // Start connection checker
             startConnectionChecker();
 
+            // Listen for kick
+            listenForKick();
+
             // Update UI
             updateRoomCodeDisplay(roomCode);
             if (activeDisplayName) activeDisplayName.textContent = displayName;
@@ -199,6 +206,106 @@ window.room = (function() {
         }
     }
 
+    // Listen for being kicked
+    function listenForKick() {
+        if (!currentRoom || !currentUser) return;
+        
+        if (kickedListener) {
+            kickedListener();
+        }
+
+        // Listen for deletion of own participant document (means we were kicked)
+        kickedListener = db.collection('rooms').doc(currentRoom)
+            .collection('participants').doc(currentUser.uid)
+            .onSnapshot((doc) => {
+                if (!doc.exists && currentRoom && !leaveInProgress) {
+                    console.log('You have been kicked from the room');
+                    
+                    // Clean up WebRTC connections
+                    if (window.peer && typeof window.peer.cleanup === 'function') {
+                        window.peer.cleanup();
+                    }
+                    
+                    // Clear intervals
+                    if (heartbeatInterval) {
+                        clearInterval(heartbeatInterval);
+                        heartbeatInterval = null;
+                    }
+                    
+                    // Show message
+                    window.auth.showError('❌ Вас выгнали из комнаты');
+                    
+                    // Force leave
+                    forceLeave();
+                }
+            }, (error) => {
+                console.error('Kick listener error:', error);
+            });
+    }
+
+    // Force leave without cleanup
+    function forceLeave() {
+        console.log('Force leaving room due to kick');
+        
+        leaveInProgress = true;
+        
+        // Clear intervals
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+        }
+        if (connectionCheckInterval) {
+            clearInterval(connectionCheckInterval);
+            connectionCheckInterval = null;
+        }
+        if (roomCheckTimeout) {
+            clearTimeout(roomCheckTimeout);
+            roomCheckTimeout = null;
+        }
+
+        // Remove event listeners
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        window.removeEventListener('pagehide', handlePageHide);
+        window.removeEventListener('visibilitychange', handleVisibilityChange);
+
+        // Remove Firestore listeners
+        if (roomListener) {
+            roomListener();
+            roomListener = null;
+        }
+        if (participantsListener) {
+            participantsListener();
+            participantsListener = null;
+        }
+        if (messagesListener) {
+            messagesListener();
+            messagesListener = null;
+        }
+        if (kickedListener) {
+            kickedListener();
+            kickedListener = null;
+        }
+        
+        // Cleanup WebRTC
+        if (window.peer && typeof window.peer.cleanup === 'function') {
+            window.peer.cleanup();
+        }
+
+        // Clear UI
+        if (participantsContainer) participantsContainer.innerHTML = '';
+        if (chatMessages) chatMessages.innerHTML = '';
+        
+        currentRoom = null;
+        roomCode = null;
+        isHost = false;
+        leaveInProgress = false;
+
+        // Show room container
+        if (roomContainer) roomContainer.classList.remove('hidden');
+        if (activeRoomContainer) activeRoomContainer.classList.add('hidden');
+        if (roomCodeInput) roomCodeInput.value = '';
+    }
+
     // Mute participant (host only)
     async function muteParticipant(userId) {
         if (!isHost || !currentRoom) return;
@@ -208,6 +315,9 @@ window.room = (function() {
                 muted: true
             });
             console.log('Participant muted:', userId);
+            
+            // Notify the participant via WebRTC if possible
+            // This will be handled by the UI update
         } catch (error) {
             console.error('Error muting participant:', error);
         }
@@ -232,17 +342,34 @@ window.room = (function() {
         if (!isHost || !currentRoom || userId === currentUser?.uid) return;
         
         try {
-            // Remove participant from room
+            // First, notify the participant via a special message
+            await db.collection('rooms').doc(currentRoom).collection('messages').add({
+                senderId: 'system',
+                senderName: '👑 Система',
+                message: `Пользователь был удален из комнаты`,
+                type: 'kick',
+                targetUserId: userId,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Remove participant from room (this will trigger the kick listener)
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(userId).delete();
             
             // Remove from participants array
             await db.collection('rooms').doc(currentRoom).update({
                 participants: firebase.firestore.FieldValue.arrayRemove(userId)
             });
+
+            // Close WebRTC connection to this participant
+            if (window.peer && typeof window.peer.closeConnection === 'function') {
+                window.peer.closeConnection(userId);
+            }
             
             console.log('Participant kicked:', userId);
+            window.auth.showSuccess('Участник удален');
         } catch (error) {
             console.error('Error kicking participant:', error);
+            window.auth.showError('Ошибка при удалении участника');
         }
     }
 
@@ -251,6 +378,15 @@ window.room = (function() {
         if (!isHost || !currentRoom) return;
         
         try {
+            // Notify all participants
+            await db.collection('rooms').doc(currentRoom).collection('messages').add({
+                senderId: 'system',
+                senderName: '👑 Система',
+                message: 'Комната была удалена создателем',
+                type: 'room_deleted',
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
             // Delete all messages
             const messagesSnapshot = await db.collection('rooms').doc(currentRoom).collection('messages').get();
             const batch = db.batch();
@@ -283,9 +419,10 @@ window.room = (function() {
             console.log('Room deleted by host');
             
             window.auth.showSuccess('Комната удалена');
-            cleanup();
+            forceLeave();
         } catch (error) {
             console.error('Error deleting room:', error);
+            window.auth.showError('Ошибка при удалении комнаты');
         }
     }
 
@@ -380,7 +517,7 @@ window.room = (function() {
                 if (!doc.exists) {
                     console.log('Room deleted');
                     window.auth.showError('Комната была удалена');
-                    cleanup();
+                    forceLeave();
                 }
             }, (error) => {
                 console.error('Room listener error:', error);
@@ -409,7 +546,7 @@ window.room = (function() {
 
                 if (participantsCount) participantsCount.textContent = onlineParticipants.length;
 
-                // Check for empty room - only delete if NO participants at all
+                // Check for empty room
                 checkEmptyRoom(snapshot.docs);
 
                 const onlineIds = new Set(onlineParticipants.map(doc => doc.id));
@@ -447,7 +584,7 @@ window.room = (function() {
             clearTimeout(roomCheckTimeout);
         }
 
-        // Only delete if there are NO participants at all (not just offline)
+        // Only delete if there are NO participants at all
         if (allParticipants.length === 0) {
             console.log('Room has no participants, scheduling deletion in 5 seconds');
             roomCheckTimeout = setTimeout(async () => {
@@ -463,7 +600,7 @@ window.room = (function() {
                             
                             if (!leaveInProgress) {
                                 window.auth.showError('Комната удалена');
-                                cleanup();
+                                forceLeave();
                             }
                         }
                     } catch (error) {
@@ -485,7 +622,18 @@ window.room = (function() {
                 snapshot.docChanges().forEach((change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
-                        if (data.senderId !== firebase.auth().currentUser?.uid) {
+                        
+                        // Handle system messages
+                        if (data.type === 'kick' && data.targetUserId === currentUser?.uid) {
+                            // This is a kick message targeting us
+                            console.log('Kick message received');
+                            forceLeave();
+                        } else if (data.type === 'room_deleted') {
+                            // Room was deleted by host
+                            console.log('Room deleted message received');
+                            forceLeave();
+                        } else if (data.senderId !== firebase.auth().currentUser?.uid) {
+                            // Regular message
                             window.peer.addMessage(data.senderName, data.message);
                         }
                     }
@@ -514,7 +662,7 @@ window.room = (function() {
                     <button class="mute-btn" onclick="window.room.${data.muted ? 'unmuteParticipant' : 'muteParticipant'}('${userId}')">
                         ${data.muted ? '🔊 Включить звук' : '🔇 Заглушить'}
                     </button>
-                    <button class="kick-btn" onclick="window.room.kickParticipant('${userId}')">
+                    <button class="kick-btn" onclick="if(confirm('Вы уверены, что хотите выгнать этого участника?')) window.room.kickParticipant('${userId}')">
                         👢 Выгнать
                     </button>
                 </div>
@@ -627,6 +775,10 @@ window.room = (function() {
         if (messagesListener) {
             messagesListener();
             messagesListener = null;
+        }
+        if (kickedListener) {
+            kickedListener();
+            kickedListener = null;
         }
         
         if (window.peer && typeof window.peer.cleanup === 'function') {
