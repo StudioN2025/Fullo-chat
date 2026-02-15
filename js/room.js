@@ -5,7 +5,6 @@ window.room = (function() {
     let roomListener = null;
     let participantsListener = null;
     let messagesListener = null;
-    let myPeerId = null;
     let isHost = false;
 
     // DOM Elements
@@ -16,6 +15,8 @@ window.room = (function() {
     const roomCodeDisplay = document.getElementById('roomCodeDisplay');
     const activeDisplayName = document.getElementById('activeDisplayName');
     const participantsCount = document.getElementById('participantsCount');
+    const roomContainer = document.getElementById('roomContainer');
+    const activeRoomContainer = document.getElementById('activeRoomContainer');
 
     // Create new room
     async function createRoom() {
@@ -25,11 +26,9 @@ window.room = (function() {
             return;
         }
 
-        // Generate 12-digit room code
         roomCode = generateRoomCode();
         
         try {
-            // Get user's display name
             const userDoc = await db.collection('users').doc(user.uid).get();
             
             if (!userDoc.exists) {
@@ -39,16 +38,14 @@ window.room = (function() {
             
             const displayName = userDoc.data().displayName;
 
-            // Create room in Firestore
+            // Create room
             const roomRef = await db.collection('rooms').add({
                 code: roomCode,
                 hostId: user.uid,
                 hostName: displayName,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 participants: [user.uid],
-                active: true,
-                createdBy: user.uid,
-                createdAt_server: firebase.firestore.FieldValue.serverTimestamp()
+                active: true
             });
 
             currentRoom = roomRef.id;
@@ -60,22 +57,20 @@ window.room = (function() {
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 online: true,
-                isHost: true,
-                peerId: myPeerId || ''
+                isHost: true
             });
 
-            // Initialize PeerJS
-            myPeerId = window.peer.init(user.uid, displayName);
+            // Initialize WebRTC
+            await window.peer.init(user.uid, displayName);
             window.peer.setCurrentRoom(currentRoom);
 
             // Update UI
             updateRoomCodeDisplay(roomCode);
-            if (activeDisplayName) {
-                activeDisplayName.textContent = displayName;
-            }
-            window.auth.showActiveRoom();
+            if (activeDisplayName) activeDisplayName.textContent = displayName;
+            if (roomContainer) roomContainer.classList.add('hidden');
+            if (activeRoomContainer) activeRoomContainer.classList.remove('hidden');
             
-            // Start listening for participants
+            // Start listening
             listenToRoom();
             listenToParticipants();
             listenToMessages();
@@ -89,12 +84,7 @@ window.room = (function() {
 
     // Generate 12-digit room code
     function generateRoomCode() {
-        const chars = '0123456789';
-        let code = '';
-        for (let i = 0; i < 12; i++) {
-            code += chars[Math.floor(Math.random() * chars.length)];
-        }
-        return code;
+        return Math.random().toString().substr(2, 12);
     }
 
     // Join existing room
@@ -112,9 +102,7 @@ window.room = (function() {
         }
 
         try {
-            window.auth.showSuccess('Поиск комнаты...');
-            
-            // Find room by code
+            // Find room
             const roomsSnapshot = await db.collection('rooms')
                 .where('code', '==', code)
                 .where('active', '==', true)
@@ -128,11 +116,8 @@ window.room = (function() {
             const roomDoc = roomsSnapshot.docs[0];
             currentRoom = roomDoc.id;
             roomCode = code;
-            isHost = false;
 
-            // Get user's display name
             const userDoc = await db.collection('users').doc(user.uid).get();
-            
             if (!userDoc.exists) {
                 window.auth.showError('Профиль пользователя не найден');
                 return;
@@ -140,31 +125,28 @@ window.room = (function() {
             
             const displayName = userDoc.data().displayName;
 
-            // Add user to room participants array
+            // Add to room
             await db.collection('rooms').doc(currentRoom).update({
                 participants: firebase.firestore.FieldValue.arrayUnion(user.uid)
             });
 
-            // Add user to participants subcollection
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
                 userId: user.uid,
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 online: true,
-                isHost: false,
-                peerId: ''
+                isHost: false
             });
 
-            // Initialize PeerJS
-            myPeerId = window.peer.init(user.uid, displayName);
+            // Initialize WebRTC
+            await window.peer.init(user.uid, displayName);
             window.peer.setCurrentRoom(currentRoom);
 
             // Update UI
             updateRoomCodeDisplay(roomCode);
-            if (activeDisplayName) {
-                activeDisplayName.textContent = displayName;
-            }
-            window.auth.showActiveRoom();
+            if (activeDisplayName) activeDisplayName.textContent = displayName;
+            if (roomContainer) roomContainer.classList.add('hidden');
+            if (activeRoomContainer) activeRoomContainer.classList.remove('hidden');
 
             // Start listening
             listenToRoom();
@@ -178,89 +160,60 @@ window.room = (function() {
         }
     }
 
-    // Update room code display
     function updateRoomCodeDisplay(code) {
-        if (currentRoomCode) {
-            currentRoomCode.textContent = code;
-        }
-        if (roomCodeDisplay) {
-            roomCodeDisplay.textContent = code;
-        }
+        if (currentRoomCode) currentRoomCode.textContent = code;
+        if (roomCodeDisplay) roomCodeDisplay.textContent = code;
     }
 
-    // Listen to room changes
     function listenToRoom() {
         if (!currentRoom) return;
-        
-        if (roomListener) {
-            roomListener();
-        }
+        if (roomListener) roomListener();
 
         roomListener = db.collection('rooms').doc(currentRoom)
             .onSnapshot((doc) => {
-                if (!doc.exists) {
-                    window.auth.showError('Комната не существует');
+                if (!doc.exists || !doc.data().active) {
+                    window.auth.showError('Комната закрыта');
                     leaveRoom();
-                } else {
-                    const data = doc.data();
-                    if (!data.active) {
-                        window.auth.showError('Комната закрыта');
-                        leaveRoom();
-                    }
                 }
-            }, (error) => {
-                console.error('Room listener error:', error);
-                // Don't show error to user, just log it
             });
     }
 
-    // Listen to participants
     function listenToParticipants() {
         if (!currentRoom) return;
-        
-        if (participantsListener) {
-            participantsListener();
-        }
+        if (participantsListener) participantsListener();
 
         participantsListener = db.collection('rooms').doc(currentRoom)
             .collection('participants')
             .onSnapshot((snapshot) => {
-                // Update participants count
-                if (participantsCount) {
-                    participantsCount.textContent = snapshot.size;
-                }
+                if (participantsCount) participantsCount.textContent = snapshot.size;
 
                 snapshot.docChanges().forEach((change) => {
-                    const participantData = change.doc.data();
+                    const data = change.doc.data();
                     
                     if (change.type === 'added') {
-                        addParticipantToUI(change.doc.id, participantData);
-                        // Only connect to new participants if they're not the current user
+                        addParticipantToUI(change.doc.id, data);
                         if (change.doc.id !== firebase.auth().currentUser?.uid) {
-                            connectToNewParticipant(change.doc.id, participantData);
+                            // Connect to new participant after a short delay
+                            setTimeout(() => {
+                                window.peer.connectToPeer(change.doc.id, data.displayName);
+                            }, 1000);
                         }
                     }
                     
                     if (change.type === 'modified') {
-                        updateParticipantInUI(change.doc.id, participantData);
+                        updateParticipantInUI(change.doc.id, data);
                     }
                     
                     if (change.type === 'removed') {
                         removeParticipantFromUI(change.doc.id);
                     }
                 });
-            }, (error) => {
-                console.error('Participants listener error:', error);
             });
     }
 
-    // Listen to messages
     function listenToMessages() {
         if (!currentRoom) return;
-        
-        if (messagesListener) {
-            messagesListener();
-        }
+        if (messagesListener) messagesListener();
 
         messagesListener = db.collection('rooms').doc(currentRoom)
             .collection('messages')
@@ -269,22 +222,16 @@ window.room = (function() {
                 snapshot.docChanges().forEach((change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
-                        // Don't add own messages twice
                         if (data.senderId !== firebase.auth().currentUser?.uid) {
                             addMessageToUI(data.senderName, data.message);
                         }
                     }
                 });
-            }, (error) => {
-                console.error('Messages listener error:', error);
             });
     }
 
-    // Add participant to UI
     function addParticipantToUI(userId, data) {
         if (!participantsContainer) return;
-        
-        // Check if already exists
         if (document.getElementById(`participant-${userId}`)) return;
 
         const card = document.createElement('div');
@@ -293,17 +240,15 @@ window.room = (function() {
         
         const isCurrentUser = userId === firebase.auth().currentUser?.uid;
         const statusText = data.online ? '🔊 В сети' : '📴 Не в сети';
-        const statusClass = data.online ? '' : 'muted';
         const hostBadge = data.isHost ? ' 👑' : '';
         
         card.innerHTML = `
             <div class="participant-name">
                 ${data.displayName || 'Unknown'}${hostBadge}
-                ${isCurrentUser ? '<span style="font-size: 12px; color: #667eea;"> (Вы)</span>' : ''}
+                ${isCurrentUser ? '<span style="font-size: 12px;"> (Вы)</span>' : ''}
             </div>
-            <div class="participant-status ${statusClass}">
-                ${statusText}
-                ${data.muted ? ' 🔇' : ''}
+            <div class="participant-status ${data.online ? '' : 'muted'}">
+                ${statusText} ${data.muted ? '🔇' : ''}
             </div>
         `;
 
@@ -317,18 +262,14 @@ window.room = (function() {
             if (statusDiv) {
                 statusDiv.textContent = data.online ? '🔊 В сети' : '📴 Не в сети';
                 statusDiv.classList.toggle('muted', !data.online);
-                if (data.muted) {
-                    statusDiv.textContent += ' 🔇';
-                }
+                if (data.muted) statusDiv.textContent += ' 🔇';
             }
         }
     }
 
     function removeParticipantFromUI(userId) {
         const card = document.getElementById(`participant-${userId}`);
-        if (card) {
-            card.remove();
-        }
+        if (card) card.remove();
     }
 
     function addMessageToUI(sender, message) {
@@ -341,61 +282,31 @@ window.room = (function() {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    // Connect to new participant via PeerJS
-    function connectToNewParticipant(userId, data) {
-        if (!data.peerId) return;
-        
-        // Check if we already have a connection
-        if (window.peer && typeof window.peer.connectToPeer === 'function') {
-            console.log('Connecting to new participant:', userId, 'with peerId:', data.peerId);
-            window.peer.connectToPeer(data.peerId, userId);
-        }
-    }
-
-    // Copy room code to clipboard
     function copyRoomCode() {
         if (!roomCode) return;
-        
-        navigator.clipboard.writeText(roomCode).then(() => {
-            window.auth.showSuccess('Код скопирован в буфер обмена!');
-        }).catch((err) => {
-            console.error('Error copying to clipboard:', err);
-            window.auth.showError('Ошибка копирования кода');
-        });
+        navigator.clipboard.writeText(roomCode)
+            .then(() => window.auth.showSuccess('Код скопирован!'))
+            .catch(() => window.auth.showError('Ошибка копирования'));
     }
 
-    // Leave room
     async function leaveRoom() {
         const user = firebase.auth().currentUser;
         
         if (currentRoom && user) {
             try {
-                // Update participant status
                 await db.collection('rooms').doc(currentRoom)
                     .collection('participants').doc(user.uid)
-                    .update({
-                        online: false,
-                        leftAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                    .update({ online: false });
 
-                // Remove from room participants array
                 await db.collection('rooms').doc(currentRoom).update({
                     participants: firebase.firestore.FieldValue.arrayRemove(user.uid)
                 });
 
-                // Check if room is empty and user is host
                 const roomDoc = await db.collection('rooms').doc(currentRoom).get();
                 if (roomDoc.exists) {
-                    const roomData = roomDoc.data();
-                    const participants = roomData.participants || [];
-                    
-                    // If room is empty or host is leaving and no other participants, close the room
-                    if (participants.length === 0 || (roomData.hostId === user.uid && participants.length === 1)) {
-                        await db.collection('rooms').doc(currentRoom).update({
-                            active: false,
-                            closedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                            closedBy: user.uid
-                        });
+                    const participants = roomDoc.data().participants || [];
+                    if (participants.length === 0) {
+                        await db.collection('rooms').doc(currentRoom).update({ active: false });
                     }
                 }
             } catch (error) {
@@ -403,79 +314,33 @@ window.room = (function() {
             }
         }
 
-        // Clean up listeners
-        if (roomListener) {
-            roomListener();
-            roomListener = null;
-        }
-        if (participantsListener) {
-            participantsListener();
-            participantsListener = null;
-        }
-        if (messagesListener) {
-            messagesListener();
-            messagesListener = null;
-        }
-
-        // Clean up PeerJS
-        if (window.peer && typeof window.peer.cleanup === 'function') {
-            window.peer.cleanup();
-        }
-
-        // Clear UI
-        if (participantsContainer) {
-            participantsContainer.innerHTML = '';
-        }
-        if (chatMessages) {
-            chatMessages.innerHTML = '';
-        }
+        // Cleanup
+        if (roomListener) roomListener();
+        if (participantsListener) participantsListener();
+        if (messagesListener) messagesListener();
         
-        // Reset room variables
+        window.peer.cleanup();
+
+        if (participantsContainer) participantsContainer.innerHTML = '';
+        if (chatMessages) chatMessages.innerHTML = '';
+        
         currentRoom = null;
         roomCode = null;
-        isHost = false;
-        myPeerId = null;
 
-        // Show room container
-        const roomContainer = document.getElementById('roomContainer');
-        const activeRoomContainer = document.getElementById('activeRoomContainer');
-        
-        if (roomContainer) {
-            roomContainer.classList.remove('hidden');
-        }
-        if (activeRoomContainer) {
-            activeRoomContainer.classList.add('hidden');
-        }
+        if (roomContainer) roomContainer.classList.remove('hidden');
+        if (activeRoomContainer) activeRoomContainer.classList.add('hidden');
         
         window.auth.showSuccess('Вы покинули комнату');
-        
-        // Clear room code input
-        if (roomCodeInput) {
-            roomCodeInput.value = '';
-        }
+        if (roomCodeInput) roomCodeInput.value = '';
     }
 
-    // Get current room info
-    function getCurrentRoom() {
-        return currentRoom;
-    }
-
-    function getRoomCode() {
-        return roomCode;
-    }
-
-    function isCurrentUserHost() {
-        return isHost;
-    }
-
-    // Public API
     return {
         createRoom,
         joinRoom,
         leaveRoom,
         copyRoomCode,
-        getCurrentRoom,
-        getRoomCode,
-        isCurrentUserHost
+        getCurrentRoom: () => currentRoom,
+        getRoomCode: () => roomCode,
+        isCurrentUserHost: () => isHost
     };
 })();
