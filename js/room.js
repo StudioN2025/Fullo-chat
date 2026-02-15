@@ -5,7 +5,7 @@ window.room = (function() {
     let roomListener = null;
     let participantsListener = null;
     let messagesListener = null;
-    let presenceListener = null;
+    let presenceInterval = null;
     let isHost = false;
     let roomCheckTimeout = null;
 
@@ -59,9 +59,8 @@ window.room = (function() {
                 userId: user.uid,
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                online: true,
-                isHost: true,
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                isHost: true
+                // Нет поля online - участники либо есть в коллекции, либо их нет
             });
 
             // Initialize WebRTC
@@ -138,13 +137,12 @@ window.room = (function() {
                 lastActive: firebase.firestore.FieldValue.serverTimestamp()
             });
 
+            // Add participant (просто добавляем документ, без поля online)
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
                 userId: user.uid,
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                online: true,
-                isHost: false,
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                isHost: false
             });
 
             // Initialize WebRTC
@@ -172,38 +170,37 @@ window.room = (function() {
         }
     }
 
-    // Setup presence monitoring
+    // Setup presence monitoring (только для обновления времени последней активности)
     function setupPresence() {
         const user = firebase.auth().currentUser;
         if (!user || !currentRoom) return;
 
-        // Update presence every 30 seconds
-        const presenceInterval = setInterval(() => {
+        // Update lastSeen every 30 seconds
+        presenceInterval = setInterval(() => {
             if (currentRoom && user) {
                 db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid)
                     .update({
-                        online: true,
                         lastSeen: firebase.firestore.FieldValue.serverTimestamp()
                     })
                     .catch(err => console.error('Error updating presence:', err));
-            } else {
-                clearInterval(presenceInterval);
             }
         }, 30000);
 
-        // Set up beforeunload handler
+        // Set up beforeunload handler для выхода из комнаты при закрытии вкладки
         window.addEventListener('beforeunload', function() {
             if (currentRoom && user) {
-                db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid)
-                    .update({
-                        online: false,
-                        leftAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                // Используем fetch чтобы отправить запрос на выход перед закрытием
+                navigator.sendBeacon = navigator.sendBeacon || function() {};
+                const data = JSON.stringify({
+                    roomId: currentRoom,
+                    userId: user.uid
+                });
+                navigator.sendBeacon('/api/leave-room', data);
+                
+                // Также пытаемся выполнить синхронный выход
+                leaveRoom();
             }
         });
-
-        // Store interval for cleanup
-        presenceListener = presenceInterval;
     }
 
     function updateRoomCodeDisplay(code) {
@@ -269,28 +266,23 @@ window.room = (function() {
             clearTimeout(roomCheckTimeout);
         }
 
-        // Check if room is empty (no online participants except maybe current user)
-        let onlineCount = 0;
-        snapshot.docs.forEach(doc => {
-            if (doc.data().online) {
-                onlineCount++;
-            }
-        });
-
-        // If no online participants, schedule room deletion
-        if (onlineCount === 0) {
+        // Если нет участников, удаляем комнату через 5 секунд
+        if (snapshot.size === 0) {
             console.log('Room empty, scheduling deletion in 5 seconds');
             roomCheckTimeout = setTimeout(async () => {
                 if (currentRoom) {
                     try {
-                        await db.collection('rooms').doc(currentRoom).update({
-                            active: false,
-                            closedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                            closedReason: 'empty'
-                        });
-                        console.log('Room closed due to inactivity');
+                        // Удаляем комнату полностью
+                        await db.collection('rooms').doc(currentRoom).delete();
+                        console.log('Room deleted due to being empty');
+                        
+                        // Если мы все еще в этой комнате, выходим
+                        if (currentRoom) {
+                            cleanup();
+                            window.auth.showError('Комната удалена из-за отсутствия участников');
+                        }
                     } catch (error) {
-                        console.error('Error closing empty room:', error);
+                        console.error('Error deleting empty room:', error);
                     }
                 }
             }, 5000);
@@ -326,16 +318,16 @@ window.room = (function() {
         card.id = `participant-${userId}`;
         
         const isCurrentUser = userId === firebase.auth().currentUser?.uid;
-        const statusText = data.online ? '🔊 В сети' : '📴 Не в сети';
         const hostBadge = data.isHost ? ' 👑' : '';
+        const mutedIcon = data.muted ? ' 🔇' : '';
         
         card.innerHTML = `
             <div class="participant-name">
                 ${data.displayName || 'Unknown'}${hostBadge}
                 ${isCurrentUser ? '<span style="font-size: 12px;"> (Вы)</span>' : ''}
             </div>
-            <div class="participant-status ${data.online ? '' : 'muted'}">
-                ${statusText} ${data.muted ? '🔇' : ''}
+            <div class="participant-status">
+                🟢 В комнате${mutedIcon}
             </div>
         `;
 
@@ -347,16 +339,16 @@ window.room = (function() {
         if (card) {
             const statusDiv = card.querySelector('.participant-status');
             if (statusDiv) {
-                statusDiv.textContent = data.online ? '🔊 В сети' : '📴 Не в сети';
-                statusDiv.classList.toggle('muted', !data.online);
-                if (data.muted) statusDiv.textContent += ' 🔇';
+                statusDiv.innerHTML = `🟢 В комнате${data.muted ? ' 🔇' : ''}`;
             }
         }
     }
 
     function removeParticipantFromUI(userId) {
         const card = document.getElementById(`participant-${userId}`);
-        if (card) card.remove();
+        if (card) {
+            card.remove();
+        }
     }
 
     function copyRoomCode() {
@@ -371,29 +363,25 @@ window.room = (function() {
         
         if (currentRoom && user) {
             try {
-                // Update participant status
+                // Удаляем участника из подколлекции participants
                 await db.collection('rooms').doc(currentRoom)
                     .collection('participants').doc(user.uid)
-                    .update({ 
-                        online: false,
-                        leftAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                    .delete();
 
-                // Remove from room participants array
+                // Удаляем пользователя из массива participants в документе комнаты
                 await db.collection('rooms').doc(currentRoom).update({
                     participants: firebase.firestore.FieldValue.arrayRemove(user.uid)
                 });
 
-                // Check if room is empty
-                const roomDoc = await db.collection('rooms').doc(currentRoom).get();
-                if (roomDoc.exists) {
-                    const participants = roomDoc.data().participants || [];
-                    if (participants.length === 0) {
-                        await db.collection('rooms').doc(currentRoom).update({ 
-                            active: false,
-                            closedAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
+                // Проверяем, остались ли еще участники
+                const participantsSnapshot = await db.collection('rooms').doc(currentRoom)
+                    .collection('participants')
+                    .get();
+
+                // Если участников больше нет, удаляем комнату
+                if (participantsSnapshot.empty) {
+                    await db.collection('rooms').doc(currentRoom).delete();
+                    console.log('Room deleted as last participant left');
                 }
             } catch (error) {
                 console.error('Error leaving room:', error);
@@ -406,9 +394,9 @@ window.room = (function() {
 
     function cleanup() {
         // Clear presence interval
-        if (presenceListener) {
-            clearInterval(presenceListener);
-            presenceListener = null;
+        if (presenceInterval) {
+            clearInterval(presenceInterval);
+            presenceInterval = null;
         }
 
         // Clear room check timeout
