@@ -13,7 +13,7 @@ window.room = (function() {
     let currentUser = null;
     let kickedListener = null;
     let wasKicked = false;
-    let backgroundMode = false;
+    let lastHeartbeatTime = Date.now();
 
     // DOM Elements
     const roomCodeInput = document.getElementById('roomCodeInput');
@@ -311,7 +311,6 @@ window.room = (function() {
         isHost = false;
         leaveInProgress = false;
         wasKicked = false;
-        backgroundMode = false;
 
         // Show room container
         if (roomContainer) roomContainer.classList.remove('hidden');
@@ -337,7 +336,6 @@ window.room = (function() {
         // Remove event listeners
         window.removeEventListener('beforeunload', handleBeforeUnload);
         window.removeEventListener('pagehide', handlePageHide);
-        // НЕ удаляем visibilitychange, так как он больше не используется для выхода
 
         // Remove Firestore listeners
         if (roomListener) {
@@ -513,7 +511,7 @@ window.room = (function() {
         }
     }
 
-    // Heartbeat - обновляет статус online каждые 5 секунд
+    // Heartbeat - обновляет статус online каждые 3 секунды
     function startHeartbeat() {
         const user = firebase.auth().currentUser;
         if (!user || !currentRoom) return;
@@ -529,27 +527,24 @@ window.room = (function() {
                         online: true,
                         lastSeen: firebase.firestore.FieldValue.serverTimestamp()
                     });
+                    lastHeartbeatTime = Date.now();
                     console.log('Heartbeat sent');
                 } catch (error) {
                     console.error('Error sending heartbeat:', error);
                 }
             }
-        }, 5000); // Увеличили до 5 секунд для экономии ресурсов
+        }, 3000); // Каждые 3 секунды
 
-        // Слушаем только реальное закрытие страницы
         window.addEventListener('beforeunload', handleBeforeUnload);
         window.addEventListener('pagehide', handlePageHide);
-        // Убрали visibilitychange - теперь при сворачивании не выходим
     }
 
     function handleBeforeUnload() {
-        // Только при реальном закрытии страницы
         console.log('Page is being unloaded, leaving room');
         immediateLeave();
     }
 
     function handlePageHide() {
-        // Только при закрытии вкладки
         console.log('Page is being hidden, leaving room');
         immediateLeave();
     }
@@ -589,7 +584,6 @@ window.room = (function() {
             if (!window.navigator.onLine && !leaveInProgress && !wasKicked) {
                 console.log('Internet connection lost');
                 window.auth.showError('Потеряно соединение с интернетом');
-                // Не выходим из комнаты, просто предупреждаем
             }
         }, 5000);
     }
@@ -627,7 +621,7 @@ window.room = (function() {
                 const now = Date.now();
                 const currentUserId = firebase.auth().currentUser?.uid;
                 
-                // Filter online participants (lastSeen not older than 15 seconds)
+                // Filter online participants (lastSeen not older than 7 seconds)
                 const onlineParticipants = snapshot.docs.filter(doc => {
                     const data = doc.data();
                     
@@ -641,7 +635,8 @@ window.room = (function() {
                     if (data.lastSeen) {
                         const lastSeen = data.lastSeen.toDate ? data.lastSeen.toDate() : new Date(data.lastSeen);
                         const diff = now - lastSeen.getTime();
-                        return diff < 15000; // 15 seconds (увеличили для фонового режима)
+                        // 7 секунд - компромисс между фоновым режимом и своевременным удалением
+                        return diff < 7000; 
                     }
                     return false;
                 });
@@ -695,7 +690,7 @@ window.room = (function() {
 
         // Only delete if there are NO other participants
         if (otherParticipants.length === 0) {
-            console.log('Room has no other participants, scheduling deletion in 10 seconds');
+            console.log('Room has no other participants, scheduling deletion in 7 seconds');
             roomCheckTimeout = setTimeout(async () => {
                 if (currentRoom) {
                     try {
@@ -717,7 +712,7 @@ window.room = (function() {
                         console.error('Error deleting empty room:', error);
                     }
                 }
-            }, 10000); // Увеличили до 10 секунд
+            }, 7000); // 7 секунд
         }
     }
 
