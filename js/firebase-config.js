@@ -1,5 +1,4 @@
 // Firebase configuration
-// Импортируем функции из SDK (для модульной версии, но мы используем compat версию)
 const firebaseConfig = {
     apiKey: "AIzaSyDnFP2OVLCn37ZGiWvACP0Bs-B8GsezaaM",
     authDomain: "fullochat-9bede.firebaseapp.com",
@@ -9,23 +8,25 @@ const firebaseConfig = {
     appId: "1:932442534036:web:d2489aabd40aae14ba4481"
 };
 
-// Initialize Firebase (используем compat версию, которая уже загружена в index.html)
+// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 
 // Initialize services
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// Enable offline persistence for better performance
-db.enablePersistence()
+// Enable offline persistence
+db.enablePersistence({ synchronizeTabs: true })
     .then(() => {
-        console.log('Firestore persistence enabled');
+        console.log('Firestore persistence enabled with tab synchronization');
     })
     .catch((err) => {
         if (err.code == 'failed-precondition') {
-            console.log('Multiple tabs open, persistence enabled in one tab only');
+            console.warn('Multiple tabs open, persistence enabled in one tab only');
         } else if (err.code == 'unimplemented') {
-            console.log('Browser doesn\'t support persistence');
+            console.warn('Browser doesn\'t support persistence');
+        } else {
+            console.error('Persistence error:', err);
         }
     });
 
