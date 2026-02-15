@@ -60,7 +60,6 @@ window.room = (function() {
                 displayName: displayName,
                 joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 isHost: true
-                // Нет поля online - участники либо есть в коллекции, либо их нет
             });
 
             // Initialize WebRTC
@@ -137,7 +136,7 @@ window.room = (function() {
                 lastActive: firebase.firestore.FieldValue.serverTimestamp()
             });
 
-            // Add participant (просто добавляем документ, без поля online)
+            // Add participant
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
                 userId: user.uid,
                 displayName: displayName,
@@ -170,7 +169,7 @@ window.room = (function() {
         }
     }
 
-    // Setup presence monitoring (только для обновления времени последней активности)
+    // Setup presence monitoring
     function setupPresence() {
         const user = firebase.auth().currentUser;
         if (!user || !currentRoom) return;
@@ -186,18 +185,10 @@ window.room = (function() {
             }
         }, 30000);
 
-        // Set up beforeunload handler для выхода из комнаты при закрытии вкладки
+        // Set up beforeunload handler
         window.addEventListener('beforeunload', function() {
             if (currentRoom && user) {
-                // Используем fetch чтобы отправить запрос на выход перед закрытием
-                navigator.sendBeacon = navigator.sendBeacon || function() {};
-                const data = JSON.stringify({
-                    roomId: currentRoom,
-                    userId: user.uid
-                });
-                navigator.sendBeacon('/api/leave-room', data);
-                
-                // Также пытаемся выполнить синхронный выход
+                // Синхронно вызываем leaveRoom перед закрытием
                 leaveRoom();
             }
         });
@@ -216,10 +207,7 @@ window.room = (function() {
             .onSnapshot((doc) => {
                 if (!doc.exists) {
                     window.auth.showError('Комната не существует');
-                    leaveRoom();
-                } else if (!doc.data().active) {
-                    window.auth.showError('Комната закрыта');
-                    leaveRoom();
+                    cleanup();
                 }
             });
     }
@@ -236,13 +224,32 @@ window.room = (function() {
                 // Check for empty room
                 checkEmptyRoom(snapshot);
 
+                // Получаем текущие ID участников в UI
+                const currentUIIds = new Set();
+                document.querySelectorAll('.participant-card').forEach(card => {
+                    currentUIIds.add(card.id.replace('participant-', ''));
+                });
+
+                // Получаем ID участников из Firebase
+                const firebaseIds = new Set();
+                snapshot.docs.forEach(doc => {
+                    firebaseIds.add(doc.id);
+                });
+
+                // Удаляем из UI тех, кого нет в Firebase
+                currentUIIds.forEach(id => {
+                    if (!firebaseIds.has(id)) {
+                        removeParticipantFromUI(id);
+                    }
+                });
+
+                // Обрабатываем изменения
                 snapshot.docChanges().forEach((change) => {
                     const data = change.doc.data();
                     
                     if (change.type === 'added') {
                         addParticipantToUI(change.doc.id, data);
                         if (change.doc.id !== firebase.auth().currentUser?.uid) {
-                            // Connect to new participant after a short delay
                             setTimeout(() => {
                                 window.peer.connectToPeer(change.doc.id, data.displayName);
                             }, 1000);
@@ -253,30 +260,24 @@ window.room = (function() {
                         updateParticipantInUI(change.doc.id, data);
                     }
                     
-                    if (change.type === 'removed') {
-                        removeParticipantFromUI(change.doc.id);
-                    }
+                    // change.type === 'removed' уже обработано выше через сравнение множеств
                 });
             });
     }
 
     function checkEmptyRoom(snapshot) {
-        // Clear previous timeout
         if (roomCheckTimeout) {
             clearTimeout(roomCheckTimeout);
         }
 
-        // Если нет участников, удаляем комнату через 5 секунд
         if (snapshot.size === 0) {
             console.log('Room empty, scheduling deletion in 5 seconds');
             roomCheckTimeout = setTimeout(async () => {
                 if (currentRoom) {
                     try {
-                        // Удаляем комнату полностью
                         await db.collection('rooms').doc(currentRoom).delete();
                         console.log('Room deleted due to being empty');
                         
-                        // Если мы все еще в этой комнате, выходим
                         if (currentRoom) {
                             cleanup();
                             window.auth.showError('Комната удалена из-за отсутствия участников');
@@ -300,7 +301,6 @@ window.room = (function() {
                 snapshot.docChanges().forEach((change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
-                        // Only add message if it's not from current user
                         if (data.senderId !== firebase.auth().currentUser?.uid) {
                             window.peer.addMessage(data.senderName, data.message);
                         }
@@ -341,12 +341,21 @@ window.room = (function() {
             if (statusDiv) {
                 statusDiv.innerHTML = `🟢 В комнате${data.muted ? ' 🔇' : ''}`;
             }
+            
+            // Обновляем имя если нужно
+            const nameDiv = card.querySelector('.participant-name');
+            if (nameDiv) {
+                const isCurrentUser = userId === firebase.auth().currentUser?.uid;
+                const hostBadge = data.isHost ? ' 👑' : '';
+                nameDiv.innerHTML = `${data.displayName || 'Unknown'}${hostBadge}${isCurrentUser ? '<span style="font-size: 12px;"> (Вы)</span>' : ''}`;
+            }
         }
     }
 
     function removeParticipantFromUI(userId) {
         const card = document.getElementById(`participant-${userId}`);
         if (card) {
+            console.log('Removing participant from UI:', userId);
             card.remove();
         }
     }
@@ -360,6 +369,7 @@ window.room = (function() {
 
     async function leaveRoom() {
         const user = firebase.auth().currentUser;
+        console.log('Leaving room:', currentRoom, 'user:', user?.uid);
         
         if (currentRoom && user) {
             try {
@@ -367,11 +377,13 @@ window.room = (function() {
                 await db.collection('rooms').doc(currentRoom)
                     .collection('participants').doc(user.uid)
                     .delete();
+                console.log('Participant deleted from subcollection');
 
                 // Удаляем пользователя из массива participants в документе комнаты
                 await db.collection('rooms').doc(currentRoom).update({
                     participants: firebase.firestore.FieldValue.arrayRemove(user.uid)
                 });
+                console.log('User removed from room participants array');
 
                 // Проверяем, остались ли еще участники
                 const participantsSnapshot = await db.collection('rooms').doc(currentRoom)
@@ -388,11 +400,13 @@ window.room = (function() {
             }
         }
 
-        // Cleanup
-        cleanup();
+        // НЕ вызываем cleanup здесь, потому что snapshot обновления
+        // придут через listener и сами обновят UI
     }
 
     function cleanup() {
+        console.log('Cleaning up room module');
+        
         // Clear presence interval
         if (presenceInterval) {
             clearInterval(presenceInterval);
