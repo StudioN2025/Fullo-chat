@@ -221,17 +221,6 @@ window.room = (function() {
                 if (!doc.exists && currentRoom && !leaveInProgress) {
                     console.log('You have been kicked from the room');
                     
-                    // Clean up WebRTC connections
-                    if (window.peer && typeof window.peer.cleanup === 'function') {
-                        window.peer.cleanup();
-                    }
-                    
-                    // Clear intervals
-                    if (heartbeatInterval) {
-                        clearInterval(heartbeatInterval);
-                        heartbeatInterval = null;
-                    }
-                    
                     // Show message
                     window.auth.showError('❌ Вас выгнали из комнаты');
                     
@@ -249,6 +238,31 @@ window.room = (function() {
         
         leaveInProgress = true;
         
+        // Stop all listeners first
+        stopAllListeners();
+        
+        // Cleanup WebRTC
+        if (window.peer && typeof window.peer.cleanup === 'function') {
+            window.peer.cleanup();
+        }
+
+        // Clear UI
+        if (participantsContainer) participantsContainer.innerHTML = '';
+        if (chatMessages) chatMessages.innerHTML = '';
+        
+        // Reset variables
+        currentRoom = null;
+        roomCode = null;
+        isHost = false;
+        leaveInProgress = false;
+
+        // Show room container
+        if (roomContainer) roomContainer.classList.remove('hidden');
+        if (activeRoomContainer) activeRoomContainer.classList.add('hidden');
+        if (roomCodeInput) roomCodeInput.value = '';
+    }
+
+    function stopAllListeners() {
         // Clear intervals
         if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
@@ -285,25 +299,6 @@ window.room = (function() {
             kickedListener();
             kickedListener = null;
         }
-        
-        // Cleanup WebRTC
-        if (window.peer && typeof window.peer.cleanup === 'function') {
-            window.peer.cleanup();
-        }
-
-        // Clear UI
-        if (participantsContainer) participantsContainer.innerHTML = '';
-        if (chatMessages) chatMessages.innerHTML = '';
-        
-        currentRoom = null;
-        roomCode = null;
-        isHost = false;
-        leaveInProgress = false;
-
-        // Show room container
-        if (roomContainer) roomContainer.classList.remove('hidden');
-        if (activeRoomContainer) activeRoomContainer.classList.add('hidden');
-        if (roomCodeInput) roomCodeInput.value = '';
     }
 
     // Mute participant (host only)
@@ -316,8 +311,10 @@ window.room = (function() {
             });
             console.log('Participant muted:', userId);
             
-            // Notify the participant via WebRTC if possible
-            // This will be handled by the UI update
+            // Close WebRTC connection to this participant
+            if (window.peer && typeof window.peer.closeConnection === 'function') {
+                window.peer.closeConnection(userId);
+            }
         } catch (error) {
             console.error('Error muting participant:', error);
         }
@@ -332,6 +329,11 @@ window.room = (function() {
                 muted: false
             });
             console.log('Participant unmuted:', userId);
+            
+            // Reconnect to participant
+            setTimeout(() => {
+                window.peer.connectToPeer(userId);
+            }, 1000);
         } catch (error) {
             console.error('Error unmuting participant:', error);
         }
@@ -352,18 +354,18 @@ window.room = (function() {
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
 
-            // Remove participant from room (this will trigger the kick listener)
+            // Close WebRTC connection to this participant
+            if (window.peer && typeof window.peer.closeConnection === 'function') {
+                window.peer.closeConnection(userId);
+            }
+
+            // Remove participant from room
             await db.collection('rooms').doc(currentRoom).collection('participants').doc(userId).delete();
             
             // Remove from participants array
             await db.collection('rooms').doc(currentRoom).update({
                 participants: firebase.firestore.FieldValue.arrayRemove(userId)
             });
-
-            // Close WebRTC connection to this participant
-            if (window.peer && typeof window.peer.closeConnection === 'function') {
-                window.peer.closeConnection(userId);
-            }
             
             console.log('Participant kicked:', userId);
             window.auth.showSuccess('Участник удален');
@@ -386,6 +388,11 @@ window.room = (function() {
                 type: 'room_deleted',
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
+
+            // Close all WebRTC connections
+            if (window.peer && typeof window.peer.cleanup === 'function') {
+                window.peer.cleanup();
+            }
 
             // Delete all messages
             const messagesSnapshot = await db.collection('rooms').doc(currentRoom).collection('messages').get();
@@ -514,7 +521,7 @@ window.room = (function() {
 
         roomListener = db.collection('rooms').doc(currentRoom)
             .onSnapshot((doc) => {
-                if (!doc.exists) {
+                if (!doc.exists && !leaveInProgress) {
                     console.log('Room deleted');
                     window.auth.showError('Комната была удалена');
                     forceLeave();
@@ -531,6 +538,8 @@ window.room = (function() {
         participantsListener = db.collection('rooms').doc(currentRoom)
             .collection('participants')
             .onSnapshot((snapshot) => {
+                if (leaveInProgress) return;
+                
                 const now = Date.now();
                 const onlineParticipants = snapshot.docs.filter(doc => {
                     const data = doc.data();
@@ -619,6 +628,8 @@ window.room = (function() {
             .collection('messages')
             .orderBy('timestamp', 'asc')
             .onSnapshot((snapshot) => {
+                if (leaveInProgress) return;
+                
                 snapshot.docChanges().forEach((change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
@@ -734,52 +745,12 @@ window.room = (function() {
                 await db.collection('rooms').doc(currentRoom).update({
                     participants: firebase.firestore.FieldValue.arrayRemove(user.uid)
                 });
-
-                // Don't delete room automatically - only host can delete or when empty
             } catch (error) {
                 console.error('Error leaving room:', error);
             }
         }
 
-        cleanup();
-    }
-
-    function cleanup() {
-        console.log('Cleaning up room module');
-        
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-            heartbeatInterval = null;
-        }
-        if (connectionCheckInterval) {
-            clearInterval(connectionCheckInterval);
-            connectionCheckInterval = null;
-        }
-        if (roomCheckTimeout) {
-            clearTimeout(roomCheckTimeout);
-            roomCheckTimeout = null;
-        }
-
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-        window.removeEventListener('pagehide', handlePageHide);
-        window.removeEventListener('visibilitychange', handleVisibilityChange);
-
-        if (roomListener) {
-            roomListener();
-            roomListener = null;
-        }
-        if (participantsListener) {
-            participantsListener();
-            participantsListener = null;
-        }
-        if (messagesListener) {
-            messagesListener();
-            messagesListener = null;
-        }
-        if (kickedListener) {
-            kickedListener();
-            kickedListener = null;
-        }
+        stopAllListeners();
         
         if (window.peer && typeof window.peer.cleanup === 'function') {
             window.peer.cleanup();
@@ -790,8 +761,8 @@ window.room = (function() {
         
         currentRoom = null;
         roomCode = null;
-        leaveInProgress = false;
         isHost = false;
+        leaveInProgress = false;
 
         if (roomContainer) roomContainer.classList.remove('hidden');
         if (activeRoomContainer) activeRoomContainer.classList.add('hidden');
