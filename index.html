@@ -95,6 +95,8 @@
             color: white;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             transition: transform 0.3s;
+            position: relative;
+            overflow: hidden;
         }
 
         .participant-card:hover {
@@ -102,10 +104,19 @@
             box-shadow: 0 8px 15px rgba(0,0,0,0.2);
         }
 
+        .participant-card.host {
+            border: 2px solid gold;
+        }
+
         .participant-name {
             font-size: 18px;
             font-weight: 600;
             margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            flex-wrap: wrap;
         }
 
         .participant-status {
@@ -115,10 +126,98 @@
             align-items: center;
             justify-content: center;
             gap: 5px;
+            margin-bottom: 10px;
         }
 
         .participant-status.muted {
             opacity: 0.6;
+        }
+
+        .participant-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .mute-btn, .kick-btn {
+            padding: 8px 12px;
+            font-size: 12px;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: auto;
+            margin: 0;
+            font-weight: 500;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .mute-btn {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .mute-btn:hover {
+            background: #e0a800;
+            transform: scale(1.05);
+        }
+
+        .kick-btn {
+            background: #dc3545;
+            color: white;
+        }
+
+        .kick-btn:hover {
+            background: #c82333;
+            transform: scale(1.05);
+        }
+
+        /* Host controls section */
+        .host-controls {
+            margin: 30px 0 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
+            border-radius: 15px;
+            border: 2px solid #ffc107;
+            box-shadow: 0 4px 10px rgba(255, 193, 7, 0.2);
+        }
+
+        .host-controls h3 {
+            color: #856404;
+            margin-bottom: 15px;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .host-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .delete-room-btn {
+            background: #dc3545;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s;
+            width: auto;
+            margin: 0;
+            box-shadow: 0 4px 10px rgba(220, 53, 69, 0.3);
+        }
+
+        .delete-room-btn:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(220, 53, 69, 0.4);
         }
 
         /* Стили для чата */
@@ -129,15 +228,21 @@
             height: 250px;
             overflow-y: auto;
             border: 1px solid #e2e8f0;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.05);
         }
 
         .message {
             margin-bottom: 15px;
-            padding: 10px 15px;
+            padding: 12px 15px;
             background: white;
             border-radius: 15px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
             animation: fadeIn 0.3s ease;
+            max-width: 80%;
+        }
+
+        .message:last-child {
+            margin-bottom: 0;
         }
 
         .message-sender {
@@ -148,6 +253,17 @@
 
         .message-text {
             color: #2d3748;
+            word-break: break-word;
+        }
+
+        .own-message {
+            background: #e3f2fd;
+            margin-left: auto;
+            border-bottom-right-radius: 5px;
+        }
+
+        .own-message .message-sender {
+            color: #1976d2;
         }
 
         @keyframes fadeIn {
@@ -169,6 +285,7 @@
             text-align: center;
             margin: 20px 0;
             border: 2px dashed #667eea;
+            box-shadow: 0 4px 10px rgba(102, 126, 234, 0.1);
         }
 
         .room-code-number {
@@ -177,6 +294,11 @@
             letter-spacing: 5px;
             color: #667eea;
             font-family: monospace;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            display: inline-block;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
 
         /* Адаптивность */
@@ -197,16 +319,62 @@
             .header {
                 flex-direction: column;
                 gap: 15px;
+                align-items: flex-start;
             }
             
             .room-info {
                 width: 100%;
                 flex-direction: column;
+                gap: 10px;
+            }
+            
+            .room-info button {
+                width: 100%;
             }
             
             .mic-button {
                 width: 100%;
             }
+            
+            .participant-controls {
+                flex-direction: column;
+            }
+            
+            .mute-btn, .kick-btn {
+                width: 100%;
+            }
+            
+            .host-buttons {
+                flex-direction: column;
+            }
+            
+            .delete-room-btn {
+                width: 100%;
+            }
+            
+            .message {
+                max-width: 90%;
+            }
+        }
+
+        /* Стили для скроллбара */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5a67d8;
         }
     </style>
 </head>
@@ -295,6 +463,16 @@
                 <!-- Участники будут добавляться сюда -->
             </div>
 
+            <!-- Панель управления для создателя -->
+            <div id="hostControls" class="host-controls hidden">
+                <h3>👑 Управление комнатой (только для создателя)</h3>
+                <div class="host-buttons">
+                    <button class="delete-room-btn" onclick="if(confirm('Вы уверены, что хотите удалить комнату? Все участники будут отключены.')) window.room.deleteRoom()">
+                        🗑️ Удалить комнату
+                    </button>
+                </div>
+            </div>
+
             <div class="chat-container">
                 <h3 style="margin-bottom: 15px; color: #2d3748;">Чат комнаты</h3>
                 <div id="chatMessages" class="chat-messages"></div>
@@ -334,7 +512,6 @@
         document.addEventListener('DOMContentLoaded', function() {
             console.log('DOM fully loaded');
             
-            // Проверяем, загружен ли Firebase
             if (typeof firebase === 'undefined') {
                 console.error('Firebase not loaded');
                 alert('Ошибка загрузки Firebase. Пожалуйста, обновите страницу.');
@@ -343,7 +520,7 @@
             }
         });
 
-        // Создание системы уведомлений
+        // Система уведомлений
         function showNotification(message, type = 'info') {
             const notification = document.createElement('div');
             notification.className = `notification ${type}`;
@@ -376,9 +553,22 @@
             if (countEl) countEl.textContent = count;
         }
 
-        // Наблюдатель за изменениями в DOM для обновления счетчика
+        // Обновление панели создателя
+        function updateHostControls() {
+            const hostControls = document.getElementById('hostControls');
+            if (hostControls) {
+                if (window.room && window.room.isCurrentUserHost()) {
+                    hostControls.classList.remove('hidden');
+                } else {
+                    hostControls.classList.add('hidden');
+                }
+            }
+        }
+
+        // Наблюдатель за изменениями в DOM
         const observer = new MutationObserver(function(mutations) {
             updateParticipantsCount();
+            updateHostControls();
         });
 
         const participantsContainer = document.getElementById('participantsContainer');
@@ -401,15 +591,17 @@
                 await originalCreateRoom.call(this);
                 const code = document.getElementById('currentRoomCode')?.textContent;
                 if (code) updateRoomCodeDisplay(code);
+                updateHostControls();
             };
         }
 
-                const originalJoinRoom = window.room?.joinRoom;
+        const originalJoinRoom = window.room?.joinRoom;
         if (originalJoinRoom) {
             window.room.joinRoom = async function() {
                 await originalJoinRoom.call(this);
                 const code = document.getElementById('currentRoomCode')?.textContent;
                 if (code) updateRoomCodeDisplay(code);
+                updateHostControls();
             };
         }
 
@@ -432,26 +624,23 @@
         }
     });
 
-    // Также добавляем обработчик перед выгрузкой страницы
     window.addEventListener('beforeunload', function() {
         if (window.room && window.room.getCurrentRoom()) {
             console.log('Page unloading, leaving room');
-            // Не вызываем асинхронную функцию, просто помечаем в localStorage
             const roomId = window.room.getCurrentRoom();
-            if (roomId) {
-                localStorage.setItem('lastRoom_' + firebase.auth().currentUser?.uid, roomId);
+            const user = firebase.auth().currentUser;
+            if (roomId && user) {
+                localStorage.setItem('lastRoom_' + user.uid, roomId);
             }
         }
     });
 
-    // При загрузке проверяем, не остались ли мы в комнате
     window.addEventListener('load', function() {
         const user = firebase.auth().currentUser;
         if (user) {
             const lastRoom = localStorage.getItem('lastRoom_' + user.uid);
             if (lastRoom) {
                 localStorage.removeItem('lastRoom_' + user.uid);
-                // Если мы все еще в комнате по мнению Firebase, выходим
                 db.collection('rooms').doc(lastRoom).collection('participants').doc(user.uid).update({
                     online: false,
                     leftAt: firebase.firestore.FieldValue.serverTimestamp()
