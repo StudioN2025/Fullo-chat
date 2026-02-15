@@ -1,14 +1,13 @@
-// Native WebRTC Peer Module (без PeerJS)
+// Native WebRTC Peer Module
 window.peer = (function() {
     let localStream = null;
-    let peerConnections = new Map(); // userId -> RTCPeerConnection
-    let remoteAudioElements = new Map(); // userId -> audio element
+    let peerConnections = new Map();
+    let remoteAudioElements = new Map();
     let micEnabled = true;
     let currentRoom = null;
     let userName = '';
     let userId = null;
-    let pendingCandidates = new Map(); // userId -> RTCIceCandidate[]
-    let connectionAttempts = new Map(); // userId -> attempts count
+    let pendingCandidates = new Map();
 
     // DOM Elements
     const micToggleButton = document.getElementById('micToggleButton');
@@ -22,11 +21,8 @@ window.peer = (function() {
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun2.l.google.com:19302' },
             { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-            { urls: 'stun:stun.ekiga.net' },
-            { urls: 'stun:stun.ideasip.com' }
-        ],
-        iceCandidatePoolSize: 10
+            { urls: 'stun:stun4.l.google.com:19302' }
+        ]
     };
 
     // Initialize
@@ -37,14 +33,11 @@ window.peer = (function() {
         console.log('Initializing WebRTC for user:', userId);
         
         try {
-            // Get user media with specific audio constraints
             localStream = await navigator.mediaDevices.getUserMedia({ 
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
-                    autoGainControl: true,
-                    channelCount: 1,
-                    sampleRate: 48000
+                    autoGainControl: true
                 }, 
                 video: false 
             });
@@ -52,7 +45,6 @@ window.peer = (function() {
             console.log('Microphone access granted');
             updateMicButton();
             
-            // Listen for WebRTC signaling from Firestore
             listenForSignaling();
             
             return userId;
@@ -63,7 +55,7 @@ window.peer = (function() {
         }
     }
 
-    // Listen for WebRTC signaling from Firestore
+    // Listen for WebRTC signaling
     function listenForSignaling() {
         if (!currentRoom || !userId) return;
 
@@ -78,8 +70,7 @@ window.peer = (function() {
                     if (change.type === 'added') {
                         const data = change.doc.data();
                         handleSignal(data);
-                        // Delete after processing
-                        change.doc.ref.delete().catch(err => console.error('Error deleting signal:', err));
+                        change.doc.ref.delete().catch(console.error);
                     }
                 });
             });
@@ -93,8 +84,7 @@ window.peer = (function() {
                     if (change.type === 'added') {
                         const data = change.doc.data();
                         handleIceCandidate(data);
-                        // Delete after processing
-                        change.doc.ref.delete().catch(err => console.error('Error deleting ICE candidate:', err));
+                        change.doc.ref.delete().catch(console.error);
                     }
                 });
             });
@@ -102,14 +92,12 @@ window.peer = (function() {
 
     // Handle signaling messages
     async function handleSignal(data) {
-        console.log('Received signal from:', data.from, 'type:', data.type);
-        
-        const fromUserId = data.from;
+        console.log('Received signal:', data.type, 'from:', data.from);
         
         if (data.type === 'offer') {
-            await handleOffer(fromUserId, data.offer);
+            await handleOffer(data.from, data.offer);
         } else if (data.type === 'answer') {
-            await handleAnswer(fromUserId, data.answer);
+            await handleAnswer(data.from, data.answer);
         }
     }
 
@@ -117,21 +105,18 @@ window.peer = (function() {
     async function handleIceCandidate(data) {
         console.log('Received ICE candidate from:', data.from);
         
-        const fromUserId = data.from;
-        
         try {
             const candidate = new RTCIceCandidate(data.candidate);
+            const peerConnection = peerConnections.get(data.from);
             
-            const peerConnection = peerConnections.get(fromUserId);
             if (peerConnection && peerConnection.remoteDescription) {
                 await peerConnection.addIceCandidate(candidate);
-                console.log('ICE candidate added to connection');
+                console.log('ICE candidate added');
             } else {
-                // Store candidate for later
-                if (!pendingCandidates.has(fromUserId)) {
-                    pendingCandidates.set(fromUserId, []);
+                if (!pendingCandidates.has(data.from)) {
+                    pendingCandidates.set(data.from, []);
                 }
-                pendingCandidates.get(fromUserId).push(candidate);
+                pendingCandidates.get(data.from).push(candidate);
                 console.log('ICE candidate stored for later');
             }
         } catch (error) {
@@ -139,25 +124,24 @@ window.peer = (function() {
         }
     }
 
-    // Create peer connection for a user
-    async function createPeerConnection(targetUserId) {
+    // Create peer connection
+    function createPeerConnection(targetUserId) {
         console.log('Creating peer connection to:', targetUserId);
         
-        const peerConnection = new RTCPeerConnection(configuration);
+        const pc = new RTCPeerConnection(configuration);
         
-        // Add local stream tracks
+        // Add local stream
         if (localStream) {
             localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
-                console.log('Added track to peer connection:', track.kind);
+                pc.addTrack(track, localStream);
+                console.log('Added track:', track.kind);
             });
         }
 
         // Handle ICE candidates
-        peerConnection.onicecandidate = (event) => {
+        pc.onicecandidate = (event) => {
             if (event.candidate) {
                 console.log('Generated ICE candidate for:', targetUserId);
-                // Send ICE candidate to target user via Firestore
                 db.collection('rooms').doc(currentRoom)
                     .collection('iceCandidates')
                     .add({
@@ -166,99 +150,68 @@ window.peer = (function() {
                         candidate: {
                             candidate: event.candidate.candidate,
                             sdpMid: event.candidate.sdpMid,
-                            sdpMLineIndex: event.candidate.sdpMLineIndex,
-                            usernameFragment: event.candidate.usernameFragment
+                            sdpMLineIndex: event.candidate.sdpMLineIndex
                         },
                         timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                    }).catch(err => console.error('Error sending ICE candidate:', err));
+                    }).catch(console.error);
             }
         };
 
-        // Handle connection state changes
-        peerConnection.onconnectionstatechange = () => {
-            console.log('Connection state to', targetUserId, ':', peerConnection.connectionState);
-            if (peerConnection.connectionState === 'connected') {
+        // Handle connection state
+        pc.onconnectionstatechange = () => {
+            console.log('Connection state to', targetUserId, ':', pc.connectionState);
+            if (pc.connectionState === 'connected') {
                 console.log('Successfully connected to:', targetUserId);
                 window.auth.showSuccess(`Подключен к участнику`);
-                connectionAttempts.delete(targetUserId);
-            } else if (peerConnection.connectionState === 'failed' || 
-                       peerConnection.connectionState === 'disconnected') {
-                console.log('Connection failed to:', targetUserId);
-                // Attempt to reconnect
-                attemptReconnect(targetUserId);
+            } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+                console.log('Connection lost to:', targetUserId);
             }
         };
 
         // Handle ICE connection state
-        peerConnection.oniceconnectionstatechange = () => {
-            console.log('ICE connection state to', targetUserId, ':', peerConnection.iceConnectionState);
+        pc.oniceconnectionstatechange = () => {
+            console.log('ICE connection state to', targetUserId, ':', pc.iceConnectionState);
         };
 
-        // Handle incoming stream
-        peerConnection.ontrack = (event) => {
+        // Handle remote stream
+        pc.ontrack = (event) => {
             console.log('Received remote stream from:', targetUserId);
-            console.log('Stream tracks:', event.streams[0].getTracks().length);
             
-            // Create audio element and play it
             const audio = document.createElement('audio');
             audio.srcObject = event.streams[0];
             audio.autoplay = true;
-            audio.controls = false;
             audio.id = `audio-${targetUserId}`;
-            audio.style.display = 'none'; // Hide audio element
+            audio.style.display = 'none';
             document.body.appendChild(audio);
             
-            // Ensure audio plays
-            audio.play().catch(e => console.log('Audio play error:', e));
-            
-            // Store reference
             const oldAudio = remoteAudioElements.get(targetUserId);
-            if (oldAudio) {
-                oldAudio.remove();
-            }
+            if (oldAudio) oldAudio.remove();
             remoteAudioElements.set(targetUserId, audio);
+            
+            audio.play().catch(e => console.log('Audio play error:', e));
             
             console.log('Remote audio added for user:', targetUserId);
         };
 
-        // Store connection
-        peerConnections.set(targetUserId, peerConnection);
-
-        return peerConnection;
+        peerConnections.set(targetUserId, pc);
+        return pc;
     }
 
-    function attemptReconnect(targetUserId) {
-        const attempts = connectionAttempts.get(targetUserId) || 0;
-        if (attempts < 3) {
-            connectionAttempts.set(targetUserId, attempts + 1);
-            console.log(`Reconnect attempt ${attempts + 1} for:`, targetUserId);
-            
-            setTimeout(() => {
-                if (peerConnections.has(targetUserId)) {
-                    const pc = peerConnections.get(targetUserId);
-                    pc.restartIce();
-                }
-            }, 2000 * (attempts + 1));
-        }
-    }
-
-    // Handle incoming offer
+    // Handle offer
     async function handleOffer(fromUserId, offerObj) {
         console.log('Handling offer from:', fromUserId);
         
         try {
-            const peerConnection = await createPeerConnection(fromUserId);
+            const pc = createPeerConnection(fromUserId);
             
-            // Set remote description
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(offerObj));
+            await pc.setRemoteDescription(new RTCSessionDescription(offerObj));
             console.log('Remote description set from offer');
             
-            // Create answer
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
             console.log('Local description set as answer');
             
-            // Send answer via Firestore (простой объект, без toJSON)
+            // Send answer
             await db.collection('rooms').doc(currentRoom)
                 .collection('signaling')
                 .add({
@@ -274,58 +227,54 @@ window.peer = (function() {
             
             console.log('Answer sent to:', fromUserId);
             
-            // Add any pending ICE candidates
+            // Add pending candidates
             const candidates = pendingCandidates.get(fromUserId);
             if (candidates) {
                 for (const candidate of candidates) {
-                    await peerConnection.addIceCandidate(candidate);
+                    await pc.addIceCandidate(candidate);
                 }
                 pendingCandidates.delete(fromUserId);
                 console.log('Added pending ICE candidates');
             }
-            
         } catch (error) {
             console.error('Error handling offer:', error);
         }
     }
 
-    // Handle incoming answer
+    // Handle answer
     async function handleAnswer(fromUserId, answerObj) {
         console.log('Handling answer from:', fromUserId);
         
         try {
-            const peerConnection = peerConnections.get(fromUserId);
-            if (!peerConnection) {
+            const pc = peerConnections.get(fromUserId);
+            if (!pc) {
                 console.error('No peer connection for:', fromUserId);
                 return;
             }
             
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(answerObj));
-            console.log('Remote description set from answer for:', fromUserId);
+            await pc.setRemoteDescription(new RTCSessionDescription(answerObj));
+            console.log('Remote description set from answer');
             
-            // Add any pending ICE candidates
             const candidates = pendingCandidates.get(fromUserId);
             if (candidates) {
                 for (const candidate of candidates) {
-                    await peerConnection.addIceCandidate(candidate);
+                    await pc.addIceCandidate(candidate);
                 }
                 pendingCandidates.delete(fromUserId);
                 console.log('Added pending ICE candidates');
             }
-            
         } catch (error) {
             console.error('Error handling answer:', error);
         }
     }
 
-    // Initiate connection to a peer
-    async function connectToPeer(targetUserId, targetDisplayName) {
+    // Connect to peer
+    async function connectToPeer(targetUserId) {
         if (!currentRoom || !userId || targetUserId === userId) {
             console.log('Cannot connect to self or invalid room');
             return;
         }
 
-        // Check if already connected or connecting
         if (peerConnections.has(targetUserId)) {
             console.log('Already have connection to:', targetUserId);
             return;
@@ -334,19 +283,17 @@ window.peer = (function() {
         console.log('Initiating connection to:', targetUserId);
 
         try {
-            // Create peer connection
-            const peerConnection = await createPeerConnection(targetUserId);
+            const pc = createPeerConnection(targetUserId);
             
-            // Create offer
-            const offer = await peerConnection.createOffer({
+            const offer = await pc.createOffer({
                 offerToReceiveAudio: true,
                 offerToReceiveVideo: false
             });
             
-            await peerConnection.setLocalDescription(offer);
+            await pc.setLocalDescription(offer);
             console.log('Local description set as offer');
             
-            // Send offer via Firestore (простой объект, без toJSON)
+            // Send offer
             await db.collection('rooms').doc(currentRoom)
                 .collection('signaling')
                 .add({
@@ -361,17 +308,8 @@ window.peer = (function() {
                 });
             
             console.log('Offer sent to:', targetUserId);
-            
         } catch (error) {
             console.error('Error connecting to peer:', error);
-        }
-    }
-
-    // Update mic button state
-    function updateMicButton() {
-        if (micToggleButton) {
-            micToggleButton.textContent = micEnabled ? '🎤 Микрофон включен' : '🔇 Микрофон выключен';
-            micToggleButton.classList.toggle('muted', !micEnabled);
         }
     }
 
@@ -385,7 +323,6 @@ window.peer = (function() {
         }
         updateMicButton();
 
-        // Update status in Firestore
         if (currentRoom && userId) {
             db.collection('rooms').doc(currentRoom).collection('participants')
                 .doc(userId)
@@ -393,32 +330,36 @@ window.peer = (function() {
                     muted: !micEnabled,
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp()
                 })
-                .catch(err => console.error('Error updating mute status:', err));
+                .catch(console.error);
         }
     }
 
-    // Send chat message via Firestore
+    function updateMicButton() {
+        if (micToggleButton) {
+            micToggleButton.textContent = micEnabled ? '🎤 Микрофон включен' : '🔇 Микрофон выключен';
+            micToggleButton.classList.toggle('muted', !micEnabled);
+        }
+    }
+
+    // Send message
     function sendMessage() {
         const message = chatInput.value.trim();
         if (!message) return;
 
-        // Display own message
         addMessage(userName, message, true);
 
-        // Send to all via Firestore
         if (currentRoom && userId) {
             db.collection('rooms').doc(currentRoom).collection('messages').add({
                 senderId: userId,
                 senderName: userName,
                 message: message,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            }).catch(err => console.error('Error sending message:', err));
+            }).catch(console.error);
         }
 
         chatInput.value = '';
     }
 
-    // Add message to chat UI
     function addMessage(sender, message, isOwn = false) {
         if (!chatMessages) return;
         
@@ -433,7 +374,6 @@ window.peer = (function() {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    // Set current room
     function setCurrentRoom(roomId) {
         currentRoom = roomId;
         if (userId) {
@@ -441,17 +381,14 @@ window.peer = (function() {
         }
     }
 
-    // Clean up
     function cleanup() {
         console.log('Cleaning up WebRTC connections');
         
-        // Close all peer connections
-        peerConnections.forEach((connection, userId) => {
-            connection.close();
+        peerConnections.forEach((pc, userId) => {
+            pc.close();
         });
         peerConnections.clear();
         
-        // Remove remote audio elements
         remoteAudioElements.forEach((audio, userId) => {
             audio.pause();
             audio.srcObject = null;
@@ -459,7 +396,6 @@ window.peer = (function() {
         });
         remoteAudioElements.clear();
         
-        // Stop local stream
         if (localStream) {
             localStream.getTracks().forEach(track => {
                 track.stop();
@@ -467,14 +403,10 @@ window.peer = (function() {
             localStream = null;
         }
         
-        // Clear pending maps
         pendingCandidates.clear();
-        connectionAttempts.clear();
-        
         currentRoom = null;
     }
 
-    // Public API
     return {
         init,
         connectToPeer,
