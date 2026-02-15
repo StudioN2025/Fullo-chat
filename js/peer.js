@@ -371,8 +371,7 @@ window.peer = (function() {
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message';
         if (isOwn) {
-            messageDiv.style.backgroundColor = '#e3f2fd';
-            messageDiv.style.marginLeft = '20px';
+            messageDiv.classList.add('own-message');
         }
         messageDiv.innerHTML = `<span class="message-sender">${sender}:</span> <span class="message-text">${message}</span>`;
         chatMessages.appendChild(messageDiv);
