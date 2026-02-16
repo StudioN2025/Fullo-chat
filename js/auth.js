@@ -4,6 +4,7 @@ window.auth = (function() {
     let currentUser = null;
     let isAuthModeLogin = true;
     let userDisplayName = '';
+    let banCheckInterval = null;
 
     // DOM Elements
     const authContainer = document.getElementById('authContainer');
@@ -26,20 +27,146 @@ window.auth = (function() {
     firebase.auth().onAuthStateChanged(async (user) => {
         if (user) {
             currentUser = user;
+            
+            // Проверяем, не забанен ли пользователь
+            const isBanned = await checkIfBanned(user.uid);
+            
+            if (isBanned) {
+                // Если забанен - разлогиниваем
+                await handleBannedUser();
+                return;
+            }
+            
             const userDoc = await db.collection('users').doc(user.uid).get();
             
             if (userDoc.exists && userDoc.data().profileCompleted) {
                 userDisplayName = userDoc.data().displayName;
                 showRoomContainer(userDisplayName);
+                // Запускаем проверку бана в реальном времени
+                startBanCheck(user.uid);
             } else {
                 showProfileContainer();
             }
         } else {
             showAuthContainer();
+            stopBanCheck();
         }
     });
 
-    // Show functions
+    // Проверка, забанен ли пользователь
+    async function checkIfBanned(uid) {
+        try {
+            const userDoc = await db.collection('users').doc(uid).get();
+            if (!userDoc.exists) return false;
+            
+            const userData = userDoc.data();
+            
+            // Если есть бан и он не истек
+            if (userData.banned) {
+                // Проверяем, не истек ли временный бан
+                if (userData.banExpiry) {
+                    const expiryDate = userData.banExpiry.toDate();
+                    if (expiryDate > new Date()) {
+                        return true; // Бан еще действует
+                    } else {
+                        // Бан истек - снимаем
+                        await db.collection('users').doc(uid).update({
+                            banned: false,
+                            banExpiry: null
+                        });
+                        return false;
+                    }
+                }
+                return true; // Постоянный бан
+            }
+            return false;
+        } catch (error) {
+            console.error('Error checking ban status:', error);
+            return false;
+        }
+    }
+
+    // Обработка забаненного пользователя
+    async function handleBannedUser() {
+        showError('❌ Ваш аккаунт заблокирован');
+        
+        // Выходим из системы
+        await firebase.auth().signOut();
+        
+        // Очищаем комнату если был в ней
+        if (window.room && window.room.getCurrentRoom()) {
+            await window.room.leaveRoom();
+        }
+        
+        // Очищаем WebRTC
+        if (window.peer) {
+            window.peer.cleanup();
+        }
+        
+        showAuthContainer();
+    }
+
+    // Запуск проверки бана в реальном времени
+    function startBanCheck(uid) {
+        if (banCheckInterval) clearInterval(banCheckInterval);
+        
+        // Проверяем каждые 30 секунд
+        banCheckInterval = setInterval(async () => {
+            if (currentUser) {
+                const isBanned = await checkIfBanned(uid);
+                if (isBanned) {
+                    showError('❌ Ваш аккаунт был заблокирован');
+                    
+                    // Если в комнате - выходим
+                    if (window.room && window.room.getCurrentRoom()) {
+                        await window.room.leaveRoom();
+                    }
+                    
+                    // Разлогиниваем
+                    await firebase.auth().signOut();
+                }
+            }
+        }, 30000);
+        
+        // Также слушаем изменения в реальном времени
+        const unsubscribe = db.collection('users').doc(uid)
+            .onSnapshot(async (doc) => {
+                if (doc.exists) {
+                    const userData = doc.data();
+                    if (userData.banned) {
+                        // Проверяем временный бан
+                        if (userData.banExpiry) {
+                            const expiryDate = userData.banExpiry.toDate();
+                            if (expiryDate > new Date()) {
+                                showError('❌ Ваш аккаунт заблокирован');
+                                await firebase.auth().signOut();
+                            }
+                        } else {
+                            showError('❌ Ваш аккаунт заблокирован');
+                            await firebase.auth().signOut();
+                        }
+                    }
+                }
+            }, (error) => {
+                console.error('Ban listener error:', error);
+            });
+            
+        // Сохраняем функцию отписки
+        window.__banUnsubscribe = unsubscribe;
+    }
+
+    function stopBanCheck() {
+        if (banCheckInterval) {
+            clearInterval(banCheckInterval);
+            banCheckInterval = null;
+        }
+        if (window.__banUnsubscribe) {
+            window.__banUnsubscribe();
+            window.__banUnsubscribe = null;
+        }
+    }
+
+    // Show functions (без изменений)
     function showAuthContainer() {
         authContainer.classList.remove('hidden');
         profileContainer.classList.add('hidden');
@@ -55,7 +182,6 @@ window.auth = (function() {
         activeRoomContainer.classList.add('hidden');
         clearMessages();
         
-        // Pre-fill name from email if available
         if (currentUser && currentUser.email) {
             const defaultName = currentUser.email.split('@')[0];
             profileNameInput.value = defaultName;
@@ -191,7 +317,9 @@ window.auth = (function() {
                 displayName: displayName,
                 email: currentUser.email,
                 profileCompleted: true,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                online: false,
+                banned: false
             });
 
             userDisplayName = displayName;
@@ -205,12 +333,12 @@ window.auth = (function() {
     // Logout
     async function logout() {
         try {
-            // Leave room if in one
+            stopBanCheck();
+            
             if (window.room && window.room.getCurrentRoom()) {
                 await window.room.leaveRoom();
             }
             
-            // Clean up peer connections
             if (window.peer) {
                 window.peer.cleanup();
             }
