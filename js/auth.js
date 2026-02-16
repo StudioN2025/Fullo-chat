@@ -5,6 +5,8 @@ window.auth = (function() {
     let isAuthModeLogin = true;
     let userDisplayName = '';
     let banCheckInterval = null;
+    let onlineHeartbeat = null;
+    let isUserActive = false;
 
     // DOM Elements
     const authContainer = document.getElementById('authContainer');
@@ -32,7 +34,6 @@ window.auth = (function() {
             const isBanned = await checkIfBanned(user.uid);
             
             if (isBanned) {
-                // Если забанен - разлогиниваем
                 await handleBannedUser();
                 return;
             }
@@ -41,17 +42,119 @@ window.auth = (function() {
             
             if (userDoc.exists && userDoc.data().profileCompleted) {
                 userDisplayName = userDoc.data().displayName;
+                
+                // Обновляем статус онлайн при загрузке страницы
+                await updateOnlineStatus(true);
+                
+                // Запускаем heartbeat для онлайн статуса
+                startOnlineHeartbeat();
+                
                 showRoomContainer(userDisplayName);
-                // Запускаем проверку бана в реальном времени
                 startBanCheck(user.uid);
             } else {
                 showProfileContainer();
             }
         } else {
             showAuthContainer();
+            stopOnlineHeartbeat();
             stopBanCheck();
         }
     });
+
+    // Обновление онлайн статуса в Firestore
+    async function updateOnlineStatus(online) {
+        if (!currentUser) return;
+        
+        try {
+            const userRef = db.collection('users').doc(currentUser.uid);
+            
+            if (online) {
+                await userRef.update({
+                    online: true,
+                    lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+                    // Не очищаем currentRoom если он есть
+                });
+            } else {
+                // При выходе офлайн, но сохраняем комнату если есть
+                const userDoc = await userRef.get();
+                const userData = userDoc.data();
+                
+                await userRef.update({
+                    online: false,
+                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                    // currentRoom остается если пользователь в комнате
+                });
+            }
+            
+            console.log(`Online status updated: ${online}`);
+        } catch (error) {
+            console.error('Error updating online status:', error);
+        }
+    }
+
+    // Heartbeat для онлайн статуса (каждые 10 секунд)
+    function startOnlineHeartbeat() {
+        if (onlineHeartbeat) clearInterval(onlineHeartbeat);
+        
+        // Сразу отмечаем как онлайн
+        updateOnlineStatus(true);
+        
+        // Обновляем статус каждые 10 секунд
+        onlineHeartbeat = setInterval(() => {
+            if (currentUser && !document.hidden) {
+                updateOnlineStatus(true);
+            }
+        }, 10000);
+        
+        // Слушаем видимость страницы
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('beforeunload', handleBeforeUnload);
+    }
+
+    function stopOnlineHeartbeat() {
+        if (onlineHeartbeat) {
+            clearInterval(onlineHeartbeat);
+            onlineHeartbeat = null;
+        }
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+    }
+
+    function handleVisibilityChange() {
+        if (currentUser) {
+            if (document.hidden) {
+                // Страница скрыта - помечаем как офлайн через 30 секунд
+                setTimeout(() => {
+                    if (document.hidden && currentUser) {
+                        updateOnlineStatus(false);
+                    }
+                }, 30000);
+            } else {
+                // Страница снова видима - сразу онлайн
+                updateOnlineStatus(true);
+            }
+        }
+    }
+
+    function handleBeforeUnload() {
+        if (currentUser) {
+            // Синхронно помечаем как офлайн при закрытии
+            const url = `https://firestore.googleapis.com/v1/projects/${firebase.app().options.projectId}/databases/(default)/documents/users/${currentUser.uid}`;
+            
+            const offlineData = {
+                fields: {
+                    online: { booleanValue: false },
+                    lastSeen: { timestampValue: new Date().toISOString() }
+                }
+            };
+            
+            try {
+                navigator.sendBeacon(url, JSON.stringify(offlineData));
+            } catch (e) {
+                console.error('Error sending beacon:', e);
+            }
+        }
+    }
 
     // Проверка, забанен ли пользователь
     async function checkIfBanned(uid) {
@@ -61,15 +164,12 @@ window.auth = (function() {
             
             const userData = userDoc.data();
             
-            // Если есть бан и он не истек
             if (userData.banned) {
-                // Проверяем, не истек ли временный бан
                 if (userData.banExpiry) {
                     const expiryDate = userData.banExpiry.toDate();
                     if (expiryDate > new Date()) {
-                        return true; // Бан еще действует
+                        return true;
                     } else {
-                        // Бан истек - снимаем
                         await db.collection('users').doc(uid).update({
                             banned: false,
                             banExpiry: null
@@ -77,7 +177,7 @@ window.auth = (function() {
                         return false;
                     }
                 }
-                return true; // Постоянный бан
+                return true;
             }
             return false;
         } catch (error) {
@@ -90,15 +190,12 @@ window.auth = (function() {
     async function handleBannedUser() {
         showError('❌ Ваш аккаунт заблокирован');
         
-        // Выходим из системы
         await firebase.auth().signOut();
         
-        // Очищаем комнату если был в ней
         if (window.room && window.room.getCurrentRoom()) {
             await window.room.leaveRoom();
         }
         
-        // Очищаем WebRTC
         if (window.peer) {
             window.peer.cleanup();
         }
@@ -110,31 +207,26 @@ window.auth = (function() {
     function startBanCheck(uid) {
         if (banCheckInterval) clearInterval(banCheckInterval);
         
-        // Проверяем каждые 30 секунд
         banCheckInterval = setInterval(async () => {
             if (currentUser) {
                 const isBanned = await checkIfBanned(uid);
                 if (isBanned) {
                     showError('❌ Ваш аккаунт был заблокирован');
                     
-                    // Если в комнате - выходим
                     if (window.room && window.room.getCurrentRoom()) {
                         await window.room.leaveRoom();
                     }
                     
-                    // Разлогиниваем
                     await firebase.auth().signOut();
                 }
             }
         }, 30000);
         
-        // Также слушаем изменения в реальном времени
         const unsubscribe = db.collection('users').doc(uid)
             .onSnapshot(async (doc) => {
                 if (doc.exists) {
                     const userData = doc.data();
                     if (userData.banned) {
-                        // Проверяем временный бан
                         if (userData.banExpiry) {
                             const expiryDate = userData.banExpiry.toDate();
                             if (expiryDate > new Date()) {
@@ -151,7 +243,6 @@ window.auth = (function() {
                 console.error('Ban listener error:', error);
             });
             
-        // Сохраняем функцию отписки
         window.__banUnsubscribe = unsubscribe;
     }
 
@@ -166,13 +257,18 @@ window.auth = (function() {
         }
     }
 
-    // Show functions (без изменений)
+    // Show functions
     function showAuthContainer() {
         authContainer.classList.remove('hidden');
         profileContainer.classList.add('hidden');
         roomContainer.classList.add('hidden');
         activeRoomContainer.classList.add('hidden');
         clearMessages();
+        
+        // При выходе на страницу входа - офлайн
+        if (currentUser) {
+            updateOnlineStatus(false);
+        }
     }
 
     function showProfileContainer() {
@@ -186,6 +282,9 @@ window.auth = (function() {
             const defaultName = currentUser.email.split('@')[0];
             profileNameInput.value = defaultName;
         }
+        
+        // На странице профиля - онлайн
+        updateOnlineStatus(true);
     }
 
     function showRoomContainer(displayName) {
@@ -198,6 +297,9 @@ window.auth = (function() {
         activeDisplayNameSpan.textContent = displayName;
         userDisplayName = displayName;
         clearMessages();
+        
+        // На странице выбора комнаты - онлайн
+        updateOnlineStatus(true);
     }
 
     function showActiveRoom() {
@@ -205,6 +307,8 @@ window.auth = (function() {
         profileContainer.classList.add('hidden');
         roomContainer.classList.add('hidden');
         activeRoomContainer.classList.remove('hidden');
+        
+        // В активной комнате - онлайн (уже обновляется через heartbeat)
     }
 
     function clearMessages() {
@@ -318,13 +422,17 @@ window.auth = (function() {
                 email: currentUser.email,
                 profileCompleted: true,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                online: false,
+                online: true,
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
                 banned: false
             });
 
             userDisplayName = displayName;
             showRoomContainer(displayName);
             showSuccess('Профиль сохранен!');
+            
+            // Запускаем heartbeat после сохранения профиля
+            startOnlineHeartbeat();
         } catch (error) {
             showError('Ошибка сохранения профиля: ' + error.message);
         }
@@ -333,7 +441,13 @@ window.auth = (function() {
     // Logout
     async function logout() {
         try {
+            stopOnlineHeartbeat();
             stopBanCheck();
+            
+            // Помечаем как офлайн перед выходом
+            if (currentUser) {
+                await updateOnlineStatus(false);
+            }
             
             if (window.room && window.room.getCurrentRoom()) {
                 await window.room.leaveRoom();
@@ -360,6 +474,7 @@ window.auth = (function() {
         showSuccess,
         showActiveRoom,
         getCurrentUser: () => currentUser,
-        getUserDisplayName: () => userDisplayName
+        getUserDisplayName: () => userDisplayName,
+        updateOnlineStatus  // Экспортируем для использования в других модулях
     };
 })();
