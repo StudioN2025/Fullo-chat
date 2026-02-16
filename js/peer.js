@@ -8,6 +8,8 @@ window.peer = (function() {
     let userName = '';
     let userId = null;
     let pendingCandidates = new Map();
+    let micGainNode = null;
+    let audioContext = null;
 
     // DOM Elements
     const micToggleButton = document.getElementById('micToggleButton');
@@ -33,6 +35,9 @@ window.peer = (function() {
         console.log('Initializing WebRTC for user:', userId);
         
         try {
+            // Создаем AudioContext для управления громкостью
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
             localStream = await navigator.mediaDevices.getUserMedia({ 
                 audio: {
                     echoCancellation: true,
@@ -42,8 +47,26 @@ window.peer = (function() {
                 video: false 
             });
             
+            // Создаем узел усиления для микрофона
+            const source = audioContext.createMediaStreamSource(localStream);
+            micGainNode = audioContext.createGain();
+            source.connect(micGainNode);
+            
+            // Создаем новый поток с усилением
+            const destination = audioContext.createMediaStreamDestination();
+            micGainNode.connect(destination);
+            
+            // Заменяем оригинальный поток на обработанный
+            localStream = destination.stream;
+            
             console.log('Microphone access granted');
             updateMicButton();
+            
+            // Загружаем настройки громкости
+            const userSettings = window.auth?.getUserSettings?.();
+            if (userSettings) {
+                setVolume(userSettings.micVolume / 100, userSettings.speakerVolume / 100);
+            }
             
             listenForSignaling();
             
@@ -53,6 +76,20 @@ window.peer = (function() {
             window.auth.showError('Ошибка доступа к микрофону: ' + error.message);
             return null;
         }
+    }
+
+    // Установка громкости
+    function setVolume(micVolume, speakerVolume) {
+        if (micGainNode) {
+            micGainNode.gain.value = micVolume;
+        }
+        
+        // Устанавливаем громкость для всех удаленных аудио
+        remoteAudioElements.forEach((audio, userId) => {
+            audio.volume = speakerVolume;
+        });
+        
+        console.log(`Volume set - mic: ${micVolume}, speaker: ${speakerVolume}`);
     }
 
     // Listen for WebRTC signaling
@@ -183,6 +220,12 @@ window.peer = (function() {
             audio.id = `audio-${targetUserId}`;
             audio.style.display = 'none';
             document.body.appendChild(audio);
+            
+            // Устанавливаем громкость из настроек
+            const userSettings = window.auth?.getUserSettings?.();
+            if (userSettings) {
+                audio.volume = userSettings.speakerVolume / 100;
+            }
             
             const oldAudio = remoteAudioElements.get(targetUserId);
             if (oldAudio) oldAudio.remove();
@@ -376,6 +419,19 @@ window.peer = (function() {
         messageDiv.innerHTML = `<span class="message-sender">${sender}:</span> <span class="message-text">${message}</span>`;
         chatMessages.appendChild(messageDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        // Воспроизводим звук уведомления если не свое сообщение
+        if (!isOwn) {
+            playNotificationSound();
+        }
+    }
+
+    function playNotificationSound() {
+        const userSettings = window.auth?.getUserSettings?.();
+        if (userSettings && userSettings.notifyMessages) {
+            // Здесь можно добавить звук уведомления
+            console.log('New message notification');
+        }
     }
 
     function setCurrentRoom(roomId) {
@@ -423,6 +479,12 @@ window.peer = (function() {
             localStream = null;
         }
         
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+        
+        micGainNode = null;
         pendingCandidates.clear();
         currentRoom = null;
         userId = null;
@@ -438,6 +500,7 @@ window.peer = (function() {
         setCurrentRoom,
         closeConnection,
         cleanup,
+        setVolume,
         isMicEnabled: () => micEnabled
     };
 })();
