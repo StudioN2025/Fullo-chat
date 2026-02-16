@@ -40,9 +40,6 @@ window.auth = (function() {
     const avatarInput = document.getElementById('avatarInput');
     const avatarPreview = document.getElementById('avatarPreview');
 
-    // Initialize Firebase Storage
-    const storage = firebase.storage();
-
     // Initialize auth state observer
     firebase.auth().onAuthStateChanged(async (user) => {
         if (user) {
@@ -113,7 +110,7 @@ window.auth = (function() {
         if (speakerVolume) speakerVolume.value = userSettings.speakerVolume;
         if (speakerVolumeValue) speakerVolumeValue.textContent = userSettings.speakerVolume + '%';
         
-        // Загружаем аватар
+        // Загружаем аватар из Base64
         if (userSettings.avatar) {
             avatarPreview.textContent = '';
             avatarPreview.style.backgroundImage = `url('${userSettings.avatar}')`;
@@ -149,48 +146,57 @@ window.auth = (function() {
         settingsModal.classList.add('hidden');
     }
 
-    // Загрузка аватара в Firebase Storage
-    async function uploadAvatar(file) {
-        if (!currentUser) return null;
-        
-        // Создаем ссылку на файл в Storage
-        const storageRef = storage.ref();
-        const avatarRef = storageRef.child(`avatars/${currentUser.uid}/${Date.now()}_${file.name}`);
-        
-        try {
-            // Показываем индикатор загрузки
-            avatarPreview.textContent = '⏳';
-            
-            // Загружаем файл
-            const snapshot = await avatarRef.put(file);
-            
-            // Получаем URL для скачивания
-            const downloadUrl = await snapshot.ref.getDownloadURL();
-            
-            console.log('Avatar uploaded successfully:', downloadUrl);
-            
-            return downloadUrl;
-        } catch (error) {
-            console.error('Error uploading avatar:', error);
-            throw error;
-        }
+    // Конвертировать изображение в Base64
+    function imageToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
     }
 
-    // Удаление старого аватара
-    async function deleteOldAvatar(avatarUrl) {
-        if (!avatarUrl || !avatarUrl.includes('firebasestorage')) return;
-        
-        try {
-            // Создаем ссылку из URL
-            const avatarRef = storage.refFromURL(avatarUrl);
-            
-            // Удаляем файл
-            await avatarRef.delete();
-            console.log('Old avatar deleted');
-        } catch (error) {
-            console.error('Error deleting old avatar:', error);
-            // Не выбрасываем ошибку, так как это не критично
-        }
+    // Оптимизация Base64 изображения (сжатие)
+    async function optimizeBase64Image(base64, maxWidth = 200, maxHeight = 200, quality = 0.7) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.src = base64;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                
+                // Уменьшаем если нужно
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height *= maxWidth / width;
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width *= maxHeight / height;
+                        height = maxHeight;
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // Конвертируем в JPEG с качеством 0.7
+                const optimizedBase64 = canvas.toDataURL('image/jpeg', quality);
+                resolve(optimizedBase64);
+            };
+        });
+    }
+
+    // Проверка размера Base64 строки (примерно)
+    function getBase64Size(base64) {
+        let stringLength = base64.length - 'data:image/jpeg;base64,'.length;
+        let sizeInBytes = 4 * Math.ceil(stringLength / 3) * 0.5624896334383812;
+        return sizeInBytes;
     }
 
     // Сохранить настройки
@@ -215,19 +221,11 @@ window.auth = (function() {
         saveButton.disabled = true;
 
         try {
-            let avatarUrl = userSettings.avatar;
+            let avatarBase64 = userSettings.avatar;
             
             // Проверяем, загружен ли новый аватар
             if (avatarInput.files.length > 0) {
                 const file = avatarInput.files[0];
-                
-                // Проверяем размер файла (макс 2MB)
-                if (file.size > 2 * 1024 * 1024) {
-                    showError('Размер файла не должен превышать 2MB');
-                    saveButton.textContent = originalText;
-                    saveButton.disabled = false;
-                    return;
-                }
                 
                 // Проверяем тип файла
                 if (!file.type.startsWith('image/')) {
@@ -237,13 +235,24 @@ window.auth = (function() {
                     return;
                 }
                 
-                // Удаляем старый аватар
-                if (userSettings.avatar) {
-                    await deleteOldAvatar(userSettings.avatar);
+                // Конвертируем в Base64
+                let base64 = await imageToBase64(file);
+                
+                // Оптимизируем изображение
+                avatarPreview.textContent = '⏳';
+                base64 = await optimizeBase64Image(base64, 150, 150, 0.6);
+                
+                // Проверяем размер (максимум 100KB после оптимизации)
+                const sizeInKB = getBase64Size(base64) / 1024;
+                if (sizeInKB > 100) {
+                    showError(`Изображение слишком большое (${Math.round(sizeInKB)}KB). Максимум 100KB`);
+                    saveButton.textContent = originalText;
+                    saveButton.disabled = false;
+                    return;
                 }
                 
-                // Загружаем новый аватар
-                avatarUrl = await uploadAvatar(file);
+                avatarBase64 = base64;
+                console.log(`Avatar size: ${Math.round(sizeInKB)}KB`);
             }
 
             const newSettings = {
@@ -254,7 +263,7 @@ window.auth = (function() {
                 notifyLeave: notifyLeave.checked,
                 micVolume: parseInt(micVolume.value),
                 speakerVolume: parseInt(speakerVolume.value),
-                avatar: avatarUrl,
+                avatar: avatarBase64,
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
 
@@ -274,12 +283,12 @@ window.auth = (function() {
                 window.peer.setVolume(newSettings.micVolume / 100, newSettings.speakerVolume / 100);
             }
 
-            // Если в комнате, обновляем имя в participants
+            // Если в комнате, обновляем имя и аватар в participants
             if (window.room && window.room.getCurrentRoom()) {
                 const roomId = window.room.getCurrentRoom();
                 await db.collection('rooms').doc(roomId).collection('participants').doc(currentUser.uid).update({
                     displayName: newName,
-                    avatar: avatarUrl
+                    avatar: avatarBase64
                 });
             }
 
@@ -302,13 +311,6 @@ window.auth = (function() {
     function handleAvatarUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-
-        // Проверяем размер (макс 2MB для предпросмотра)
-        if (file.size > 2 * 1024 * 1024) {
-            showError('Размер файла не должен превышать 2MB');
-            avatarInput.value = '';
-            return;
-        }
 
         if (!file.type.startsWith('image/')) {
             showError('Пожалуйста, выберите изображение');
@@ -532,18 +534,4 @@ window.auth = (function() {
     // Show functions
     function showAuthContainer() {
         authContainer.classList.remove('hidden');
-        profileContainer.classList.add('hidden');
-        roomContainer.classList.add('hidden');
-        activeRoomContainer.classList.add('hidden');
-        settingsModal.classList.add('hidden');
-        clearMessages();
-        
-        if (currentUser) {
-            updateOnlineStatus(false);
-        }
-    }
-
-    function showProfileContainer() {
-        authContainer.classList.add('hidden');
-        profileContainer.classList.remove('hidden');
-        roomContainer.clas
+        profileContainer.classList.add('
