@@ -6,13 +6,14 @@ window.auth = (function() {
     let userDisplayName = '';
     let banCheckInterval = null;
     let onlineHeartbeat = null;
-    let isUserActive = false;
+    let userSettings = {};
 
     // DOM Elements
     const authContainer = document.getElementById('authContainer');
     const profileContainer = document.getElementById('profileContainer');
     const roomContainer = document.getElementById('roomContainer');
     const activeRoomContainer = document.getElementById('activeRoomContainer');
+    const settingsModal = document.getElementById('settingsModal');
     const authTitle = document.getElementById('authTitle');
     const authButton = document.getElementById('authButton');
     const switchAuthButton = document.getElementById('switchAuthButton');
@@ -24,6 +25,20 @@ window.auth = (function() {
     const emailInput = document.getElementById('emailInput');
     const passwordInput = document.getElementById('passwordInput');
     const profileNameInput = document.getElementById('profileNameInput');
+
+    // Settings Elements
+    const settingsNameInput = document.getElementById('settingsNameInput');
+    const settingsEmailInput = document.getElementById('settingsEmailInput');
+    const settingsStatusSelect = document.getElementById('settingsStatusSelect');
+    const notifyMessages = document.getElementById('notifyMessages');
+    const notifyJoin = document.getElementById('notifyJoin');
+    const notifyLeave = document.getElementById('notifyLeave');
+    const micVolume = document.getElementById('micVolume');
+    const micVolumeValue = document.getElementById('micVolumeValue');
+    const speakerVolume = document.getElementById('speakerVolume');
+    const speakerVolumeValue = document.getElementById('speakerVolumeValue');
+    const avatarInput = document.getElementById('avatarInput');
+    const avatarPreview = document.getElementById('avatarPreview');
 
     // Initialize auth state observer
     firebase.auth().onAuthStateChanged(async (user) => {
@@ -43,6 +58,9 @@ window.auth = (function() {
             if (userDoc.exists && userDoc.data().profileCompleted) {
                 userDisplayName = userDoc.data().displayName;
                 
+                // Загружаем настройки пользователя
+                await loadUserSettings(userDoc.data());
+                
                 // Обновляем статус онлайн при загрузке страницы
                 await updateOnlineStatus(true);
                 
@@ -61,7 +79,122 @@ window.auth = (function() {
         }
     });
 
-    // Обновление онлайн статуса в Firestore
+    // Загрузка настроек пользователя
+    async function loadUserSettings(userData) {
+        userSettings = {
+            displayName: userData.displayName || '',
+            email: currentUser?.email || '',
+            status: userData.status || 'online',
+            notifyMessages: userData.notifyMessages !== false,
+            notifyJoin: userData.notifyJoin !== false,
+            notifyLeave: userData.notifyLeave !== false,
+            micVolume: userData.micVolume || 80,
+            speakerVolume: userData.speakerVolume || 100,
+            avatar: userData.avatar || null
+        };
+
+        // Применяем настройки к интерфейсу
+        applySettingsToUI();
+    }
+
+    // Применение настроек к UI
+    function applySettingsToUI() {
+        if (settingsNameInput) settingsNameInput.value = userSettings.displayName;
+        if (settingsEmailInput) settingsEmailInput.value = userSettings.email;
+        if (settingsStatusSelect) settingsStatusSelect.value = userSettings.status;
+        if (notifyMessages) notifyMessages.checked = userSettings.notifyMessages;
+        if (notifyJoin) notifyJoin.checked = userSettings.notifyJoin;
+        if (notifyLeave) notifyLeave.checked = userSettings.notifyLeave;
+        if (micVolume) micVolume.value = userSettings.micVolume;
+        if (micVolumeValue) micVolumeValue.textContent = userSettings.micVolume + '%';
+        if (speakerVolume) speakerVolume.value = userSettings.speakerVolume;
+        if (speakerVolumeValue) speakerVolumeValue.textContent = userSettings.speakerVolume + '%';
+        
+        // Применяем громкость к аудио
+        if (window.peer) {
+            window.peer.setVolume(userSettings.micVolume / 100, userSettings.speakerVolume / 100);
+        }
+    }
+
+    // Показать настройки
+    function showSettings() {
+        if (!currentUser) return;
+        
+        // Загружаем актуальные данные
+        db.collection('users').doc(currentUser.uid).get().then(doc => {
+            if (doc.exists) {
+                loadUserSettings(doc.data());
+            }
+        });
+        
+        settingsModal.classList.remove('hidden');
+    }
+
+    // Скрыть настройки
+    function hideSettings() {
+        settingsModal.classList.add('hidden');
+    }
+
+    // Сохранить настройки
+    async function saveSettings() {
+        if (!currentUser) return;
+
+        const newName = settingsNameInput.value.trim();
+        if (!newName) {
+            showError('Имя не может быть пустым');
+            return;
+        }
+
+        if (newName.length > 30) {
+            showError('Имя не должно превышать 30 символов');
+            return;
+        }
+
+        const newSettings = {
+            displayName: newName,
+            status: settingsStatusSelect.value,
+            notifyMessages: notifyMessages.checked,
+            notifyJoin: notifyJoin.checked,
+            notifyLeave: notifyLeave.checked,
+            micVolume: parseInt(micVolume.value),
+            speakerVolume: parseInt(speakerVolume.value),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        try {
+            // Обновляем в Firestore
+            await db.collection('users').doc(currentUser.uid).update(newSettings);
+
+            // Обновляем локально
+            userSettings = { ...userSettings, ...newSettings };
+            
+            // Обновляем отображаемое имя
+            userDisplayName = newName;
+            if (displayNameSpan) displayNameSpan.textContent = `Привет, ${newName}!`;
+            if (activeDisplayNameSpan) activeDisplayNameSpan.textContent = newName;
+
+            // Применяем настройки аудио
+            if (window.peer) {
+                window.peer.setVolume(newSettings.micVolume / 100, newSettings.speakerVolume / 100);
+            }
+
+            // Если в комнате, обновляем имя в participants
+            if (window.room && window.room.getCurrentRoom()) {
+                const roomId = window.room.getCurrentRoom();
+                await db.collection('rooms').doc(roomId).collection('participants').doc(currentUser.uid).update({
+                    displayName: newName
+                });
+            }
+
+            hideSettings();
+            showSuccess('Настройки сохранены');
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            showError('Ошибка сохранения настроек');
+        }
+    }
+
+    // Обновление онлайн статуса
     async function updateOnlineStatus(online) {
         if (!currentUser) return;
         
@@ -72,17 +205,12 @@ window.auth = (function() {
                 await userRef.update({
                     online: true,
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                    // Не очищаем currentRoom если он есть
+                    status: userSettings.status || 'online'
                 });
             } else {
-                // При выходе офлайн, но сохраняем комнату если есть
-                const userDoc = await userRef.get();
-                const userData = userDoc.data();
-                
                 await userRef.update({
                     online: false,
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                    // currentRoom остается если пользователь в комнате
                 });
             }
             
@@ -92,23 +220,68 @@ window.auth = (function() {
         }
     }
 
-    // Heartbeat для онлайн статуса (каждые 10 секунд)
+    // Heartbeat для онлайн статуса
     function startOnlineHeartbeat() {
         if (onlineHeartbeat) clearInterval(onlineHeartbeat);
         
-        // Сразу отмечаем как онлайн
         updateOnlineStatus(true);
         
-        // Обновляем статус каждые 10 секунд
         onlineHeartbeat = setInterval(() => {
             if (currentUser && !document.hidden) {
                 updateOnlineStatus(true);
             }
         }, 10000);
         
-        // Слушаем видимость страницы
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('beforeunload', handleBeforeUnload);
+
+        // Добавляем слушатели для ползунков громкости
+        if (micVolume) {
+            micVolume.addEventListener('input', function() {
+                micVolumeValue.textContent = this.value + '%';
+            });
+        }
+        if (speakerVolume) {
+            speakerVolume.addEventListener('input', function() {
+                speakerVolumeValue.textContent = this.value + '%';
+            });
+        }
+
+        // Добавляем слушатель для загрузки аватара
+        if (avatarInput) {
+            avatarInput.addEventListener('change', handleAvatarUpload);
+        }
+    }
+
+    // Обработка загрузки аватара
+    async function handleAvatarUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            showError('Пожалуйста, выберите изображение');
+            return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            showError('Размер файла не должен превышать 5MB');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            avatarPreview.textContent = '';
+            avatarPreview.style.backgroundImage = `url('${e.target.result}')`;
+            avatarPreview.style.backgroundSize = 'cover';
+            avatarPreview.style.backgroundPosition = 'center';
+            
+            // Сохраняем аватар в localStorage (временно)
+            localStorage.setItem('avatar_' + currentUser.uid, e.target.result);
+            
+            // Здесь можно добавить загрузку в Firebase Storage
+            showSuccess('Аватар загружен');
+        };
+        reader.readAsDataURL(file);
     }
 
     function stopOnlineHeartbeat() {
@@ -123,14 +296,12 @@ window.auth = (function() {
     function handleVisibilityChange() {
         if (currentUser) {
             if (document.hidden) {
-                // Страница скрыта - помечаем как офлайн через 30 секунд
                 setTimeout(() => {
                     if (document.hidden && currentUser) {
                         updateOnlineStatus(false);
                     }
                 }, 30000);
             } else {
-                // Страница снова видима - сразу онлайн
                 updateOnlineStatus(true);
             }
         }
@@ -138,7 +309,6 @@ window.auth = (function() {
 
     function handleBeforeUnload() {
         if (currentUser) {
-            // Синхронно помечаем как офлайн при закрытии
             const url = `https://firestore.googleapis.com/v1/projects/${firebase.app().options.projectId}/databases/(default)/documents/users/${currentUser.uid}`;
             
             const offlineData = {
@@ -156,7 +326,7 @@ window.auth = (function() {
         }
     }
 
-    // Проверка, забанен ли пользователь
+    // Проверка бана
     async function checkIfBanned(uid) {
         try {
             const userDoc = await db.collection('users').doc(uid).get();
@@ -186,7 +356,6 @@ window.auth = (function() {
         }
     }
 
-    // Обработка забаненного пользователя
     async function handleBannedUser() {
         showError('❌ Ваш аккаунт заблокирован');
         
@@ -203,7 +372,6 @@ window.auth = (function() {
         showAuthContainer();
     }
 
-    // Запуск проверки бана в реальном времени
     function startBanCheck(uid) {
         if (banCheckInterval) clearInterval(banCheckInterval);
         
@@ -263,9 +431,9 @@ window.auth = (function() {
         profileContainer.classList.add('hidden');
         roomContainer.classList.add('hidden');
         activeRoomContainer.classList.add('hidden');
+        settingsModal.classList.add('hidden');
         clearMessages();
         
-        // При выходе на страницу входа - офлайн
         if (currentUser) {
             updateOnlineStatus(false);
         }
@@ -276,6 +444,7 @@ window.auth = (function() {
         profileContainer.classList.remove('hidden');
         roomContainer.classList.add('hidden');
         activeRoomContainer.classList.add('hidden');
+        settingsModal.classList.add('hidden');
         clearMessages();
         
         if (currentUser && currentUser.email) {
@@ -283,7 +452,6 @@ window.auth = (function() {
             profileNameInput.value = defaultName;
         }
         
-        // На странице профиля - онлайн
         updateOnlineStatus(true);
     }
 
@@ -292,13 +460,13 @@ window.auth = (function() {
         profileContainer.classList.add('hidden');
         roomContainer.classList.remove('hidden');
         activeRoomContainer.classList.add('hidden');
+        settingsModal.classList.add('hidden');
         
         displayNameSpan.textContent = `Привет, ${displayName}!`;
         activeDisplayNameSpan.textContent = displayName;
         userDisplayName = displayName;
         clearMessages();
         
-        // На странице выбора комнаты - онлайн
         updateOnlineStatus(true);
     }
 
@@ -307,8 +475,7 @@ window.auth = (function() {
         profileContainer.classList.add('hidden');
         roomContainer.classList.add('hidden');
         activeRoomContainer.classList.remove('hidden');
-        
-        // В активной комнате - онлайн (уже обновляется через heartbeat)
+        settingsModal.classList.add('hidden');
     }
 
     function clearMessages() {
@@ -388,93 +555,4 @@ window.auth = (function() {
             case 'auth/user-not-found':
                 showError('Пользователь не найден');
                 break;
-            case 'auth/wrong-password':
-                showError('Неверный пароль');
-                break;
-            case 'auth/email-already-in-use':
-                showError('Email уже используется');
-                break;
-            case 'auth/weak-password':
-                showError('Слишком простой пароль');
-                break;
-            default:
-                showError('Ошибка: ' + error.message);
-        }
-    }
-
-    // Save profile
-    async function saveProfile() {
-        const displayName = profileNameInput.value.trim();
-        
-        if (!displayName) {
-            showError('Пожалуйста, введите ваше имя');
-            return;
-        }
-
-        if (displayName.length > 30) {
-            showError('Имя не должно превышать 30 символов');
-            return;
-        }
-
-        try {
-            await db.collection('users').doc(currentUser.uid).set({
-                displayName: displayName,
-                email: currentUser.email,
-                profileCompleted: true,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                online: true,
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                banned: false
-            });
-
-            userDisplayName = displayName;
-            showRoomContainer(displayName);
-            showSuccess('Профиль сохранен!');
-            
-            // Запускаем heartbeat после сохранения профиля
-            startOnlineHeartbeat();
-        } catch (error) {
-            showError('Ошибка сохранения профиля: ' + error.message);
-        }
-    }
-
-    // Logout
-    async function logout() {
-        try {
-            stopOnlineHeartbeat();
-            stopBanCheck();
-            
-            // Помечаем как офлайн перед выходом
-            if (currentUser) {
-                await updateOnlineStatus(false);
-            }
-            
-            if (window.room && window.room.getCurrentRoom()) {
-                await window.room.leaveRoom();
-            }
-            
-            if (window.peer) {
-                window.peer.cleanup();
-            }
-            
-            await firebase.auth().signOut();
-            showSuccess('Выход выполнен');
-        } catch (error) {
-            showError('Ошибка выхода: ' + error.message);
-        }
-    }
-
-    // Public API
-    return {
-        handleAuth,
-        switchAuthMode,
-        saveProfile,
-        logout,
-        showError,
-        showSuccess,
-        showActiveRoom,
-        getCurrentUser: () => currentUser,
-        getUserDisplayName: () => userDisplayName,
-        updateOnlineStatus  // Экспортируем для использования в других модулях
-    };
-})();
+            case 'auth/wrong-
