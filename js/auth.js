@@ -40,6 +40,9 @@ window.auth = (function() {
     const avatarInput = document.getElementById('avatarInput');
     const avatarPreview = document.getElementById('avatarPreview');
 
+    // Initialize Firebase Storage
+    const storage = firebase.storage();
+
     // Initialize auth state observer
     firebase.auth().onAuthStateChanged(async (user) => {
         if (user) {
@@ -110,6 +113,17 @@ window.auth = (function() {
         if (speakerVolume) speakerVolume.value = userSettings.speakerVolume;
         if (speakerVolumeValue) speakerVolumeValue.textContent = userSettings.speakerVolume + '%';
         
+        // Загружаем аватар
+        if (userSettings.avatar) {
+            avatarPreview.textContent = '';
+            avatarPreview.style.backgroundImage = `url('${userSettings.avatar}')`;
+            avatarPreview.style.backgroundSize = 'cover';
+            avatarPreview.style.backgroundPosition = 'center';
+        } else {
+            avatarPreview.textContent = '👤';
+            avatarPreview.style.backgroundImage = '';
+        }
+        
         // Применяем громкость к аудио
         if (window.peer) {
             window.peer.setVolume(userSettings.micVolume / 100, userSettings.speakerVolume / 100);
@@ -135,6 +149,50 @@ window.auth = (function() {
         settingsModal.classList.add('hidden');
     }
 
+    // Загрузка аватара в Firebase Storage
+    async function uploadAvatar(file) {
+        if (!currentUser) return null;
+        
+        // Создаем ссылку на файл в Storage
+        const storageRef = storage.ref();
+        const avatarRef = storageRef.child(`avatars/${currentUser.uid}/${Date.now()}_${file.name}`);
+        
+        try {
+            // Показываем индикатор загрузки
+            avatarPreview.textContent = '⏳';
+            
+            // Загружаем файл
+            const snapshot = await avatarRef.put(file);
+            
+            // Получаем URL для скачивания
+            const downloadUrl = await snapshot.ref.getDownloadURL();
+            
+            console.log('Avatar uploaded successfully:', downloadUrl);
+            
+            return downloadUrl;
+        } catch (error) {
+            console.error('Error uploading avatar:', error);
+            throw error;
+        }
+    }
+
+    // Удаление старого аватара
+    async function deleteOldAvatar(avatarUrl) {
+        if (!avatarUrl || !avatarUrl.includes('firebasestorage')) return;
+        
+        try {
+            // Создаем ссылку из URL
+            const avatarRef = storage.refFromURL(avatarUrl);
+            
+            // Удаляем файл
+            await avatarRef.delete();
+            console.log('Old avatar deleted');
+        } catch (error) {
+            console.error('Error deleting old avatar:', error);
+            // Не выбрасываем ошибку, так как это не критично
+        }
+    }
+
     // Сохранить настройки
     async function saveSettings() {
         if (!currentUser) return;
@@ -150,18 +208,56 @@ window.auth = (function() {
             return;
         }
 
-        const newSettings = {
-            displayName: newName,
-            status: settingsStatusSelect.value,
-            notifyMessages: notifyMessages.checked,
-            notifyJoin: notifyJoin.checked,
-            notifyLeave: notifyLeave.checked,
-            micVolume: parseInt(micVolume.value),
-            speakerVolume: parseInt(speakerVolume.value),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
+        // Показываем индикатор загрузки
+        const saveButton = document.querySelector('.save-btn');
+        const originalText = saveButton.textContent;
+        saveButton.textContent = '⏳ Сохранение...';
+        saveButton.disabled = true;
 
         try {
+            let avatarUrl = userSettings.avatar;
+            
+            // Проверяем, загружен ли новый аватар
+            if (avatarInput.files.length > 0) {
+                const file = avatarInput.files[0];
+                
+                // Проверяем размер файла (макс 2MB)
+                if (file.size > 2 * 1024 * 1024) {
+                    showError('Размер файла не должен превышать 2MB');
+                    saveButton.textContent = originalText;
+                    saveButton.disabled = false;
+                    return;
+                }
+                
+                // Проверяем тип файла
+                if (!file.type.startsWith('image/')) {
+                    showError('Пожалуйста, выберите изображение');
+                    saveButton.textContent = originalText;
+                    saveButton.disabled = false;
+                    return;
+                }
+                
+                // Удаляем старый аватар
+                if (userSettings.avatar) {
+                    await deleteOldAvatar(userSettings.avatar);
+                }
+                
+                // Загружаем новый аватар
+                avatarUrl = await uploadAvatar(file);
+            }
+
+            const newSettings = {
+                displayName: newName,
+                status: settingsStatusSelect.value,
+                notifyMessages: notifyMessages.checked,
+                notifyJoin: notifyJoin.checked,
+                notifyLeave: notifyLeave.checked,
+                micVolume: parseInt(micVolume.value),
+                speakerVolume: parseInt(speakerVolume.value),
+                avatar: avatarUrl,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
             // Обновляем в Firestore
             await db.collection('users').doc(currentUser.uid).update(newSettings);
 
@@ -182,16 +278,55 @@ window.auth = (function() {
             if (window.room && window.room.getCurrentRoom()) {
                 const roomId = window.room.getCurrentRoom();
                 await db.collection('rooms').doc(roomId).collection('participants').doc(currentUser.uid).update({
-                    displayName: newName
+                    displayName: newName,
+                    avatar: avatarUrl
                 });
             }
+
+            // Очищаем input файла
+            avatarInput.value = '';
 
             hideSettings();
             showSuccess('Настройки сохранены');
         } catch (error) {
             console.error('Error saving settings:', error);
-            showError('Ошибка сохранения настроек');
+            showError('Ошибка сохранения настроек: ' + error.message);
+        } finally {
+            // Восстанавливаем кнопку
+            saveButton.textContent = originalText;
+            saveButton.disabled = false;
         }
+    }
+
+    // Обработка загрузки аватара
+    function handleAvatarUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // Проверяем размер (макс 2MB для предпросмотра)
+        if (file.size > 2 * 1024 * 1024) {
+            showError('Размер файла не должен превышать 2MB');
+            avatarInput.value = '';
+            return;
+        }
+
+        if (!file.type.startsWith('image/')) {
+            showError('Пожалуйста, выберите изображение');
+            avatarInput.value = '';
+            return;
+        }
+
+        // Показываем предпросмотр
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            avatarPreview.textContent = '';
+            avatarPreview.style.backgroundImage = `url('${e.target.result}')`;
+            avatarPreview.style.backgroundSize = 'cover';
+            avatarPreview.style.backgroundPosition = 'center';
+        };
+        reader.readAsDataURL(file);
+        
+        showSuccess('Аватар выбран, нажмите "Сохранить" для загрузки');
     }
 
     // Обновление онлайн статуса
@@ -251,37 +386,6 @@ window.auth = (function() {
         if (avatarInput) {
             avatarInput.addEventListener('change', handleAvatarUpload);
         }
-    }
-
-    // Обработка загрузки аватара
-    async function handleAvatarUpload(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        if (!file.type.startsWith('image/')) {
-            showError('Пожалуйста, выберите изображение');
-            return;
-        }
-
-        if (file.size > 5 * 1024 * 1024) {
-            showError('Размер файла не должен превышать 5MB');
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            avatarPreview.textContent = '';
-            avatarPreview.style.backgroundImage = `url('${e.target.result}')`;
-            avatarPreview.style.backgroundSize = 'cover';
-            avatarPreview.style.backgroundPosition = 'center';
-            
-            // Сохраняем аватар в localStorage (временно)
-            localStorage.setItem('avatar_' + currentUser.uid, e.target.result);
-            
-            // Здесь можно добавить загрузку в Firebase Storage
-            showSuccess('Аватар загружен');
-        };
-        reader.readAsDataURL(file);
     }
 
     function stopOnlineHeartbeat() {
@@ -442,117 +546,4 @@ window.auth = (function() {
     function showProfileContainer() {
         authContainer.classList.add('hidden');
         profileContainer.classList.remove('hidden');
-        roomContainer.classList.add('hidden');
-        activeRoomContainer.classList.add('hidden');
-        settingsModal.classList.add('hidden');
-        clearMessages();
-        
-        if (currentUser && currentUser.email) {
-            const defaultName = currentUser.email.split('@')[0];
-            profileNameInput.value = defaultName;
-        }
-        
-        updateOnlineStatus(true);
-    }
-
-    function showRoomContainer(displayName) {
-        authContainer.classList.add('hidden');
-        profileContainer.classList.add('hidden');
-        roomContainer.classList.remove('hidden');
-        activeRoomContainer.classList.add('hidden');
-        settingsModal.classList.add('hidden');
-        
-        displayNameSpan.textContent = `Привет, ${displayName}!`;
-        activeDisplayNameSpan.textContent = displayName;
-        userDisplayName = displayName;
-        clearMessages();
-        
-        updateOnlineStatus(true);
-    }
-
-    function showActiveRoom() {
-        authContainer.classList.add('hidden');
-        profileContainer.classList.add('hidden');
-        roomContainer.classList.add('hidden');
-        activeRoomContainer.classList.remove('hidden');
-        settingsModal.classList.add('hidden');
-    }
-
-    function clearMessages() {
-        errorMessage.textContent = '';
-        successMessage.textContent = '';
-    }
-
-    function showError(text) {
-        errorMessage.textContent = text;
-        successMessage.textContent = '';
-        if (window.showNotification) {
-            window.showNotification(text, 'error');
-        }
-    }
-
-    function showSuccess(text) {
-        successMessage.textContent = text;
-        errorMessage.textContent = '';
-        if (window.showNotification) {
-            window.showNotification(text, 'success');
-        }
-    }
-
-    // Switch between login and signup
-    function switchAuthMode() {
-        isAuthModeLogin = !isAuthModeLogin;
-        if (isAuthModeLogin) {
-            authTitle.textContent = 'Вход в FulloChat';
-            authButton.textContent = 'Войти';
-            switchAuthButton.textContent = 'Создать аккаунт';
-            switchAuthText.textContent = 'Нет аккаунта? Зарегистрируйтесь';
-        } else {
-            authTitle.textContent = 'Регистрация в FulloChat';
-            authButton.textContent = 'Зарегистрироваться';
-            switchAuthButton.textContent = 'Войти';
-            switchAuthText.textContent = 'Уже есть аккаунт? Войдите';
-        }
-        clearMessages();
-    }
-
-    // Handle authentication
-    async function handleAuth() {
-        const email = emailInput.value.trim();
-        const password = passwordInput.value;
-
-        if (!email || !password) {
-            showError('Пожалуйста, заполните все поля');
-            return;
-        }
-
-        if (password.length < 6) {
-            showError('Пароль должен содержать минимум 6 символов');
-            return;
-        }
-
-        try {
-            if (isAuthModeLogin) {
-                await firebase.auth().signInWithEmailAndPassword(email, password);
-                showSuccess('Вход выполнен успешно!');
-            } else {
-                await firebase.auth().createUserWithEmailAndPassword(email, password);
-                showSuccess('Регистрация успешна! Заполните профиль.');
-            }
-        } catch (error) {
-            handleAuthError(error);
-        }
-    }
-
-    function handleAuthError(error) {
-        switch (error.code) {
-            case 'auth/invalid-email':
-                showError('Неверный формат email');
-                break;
-            case 'auth/user-disabled':
-                showError('Пользователь заблокирован');
-                break;
-            case 'auth/user-not-found':
-                showError('Пользователь не найден');
-                break;
-            case 'auth/wrong-
+        roomContainer.clas
