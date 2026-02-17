@@ -948,7 +948,7 @@ button.logout-btn:hover {
         text-align: center;
     }
     
-    .settings-btn {
+       .settings-btn {
         width: 100%;
     }
     
@@ -1001,5 +1001,88 @@ button.logout-btn:hover {
     
     button, .mic-control, .chat-input-container {
         display: none;
+    }
+}
+
+/* Стили для аватарок в списке участников */
+.participant-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.participant-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background-size: cover;
+    background-position: center;
+    border: 2px solid white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    flex-shrink: 0;
+}
+
+.participant-avatar.default-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.participant-name-container {
+    flex: 1;
+    min-width: 0;
+}
+
+.participant-name {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.current-user-badge {
+    font-size: 11px;
+    background: rgba(255,255,255,0.2);
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 5px;
+}
+
+.participant-status {
+    font-size: 12px;
+    opacity: 0.9;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Для карточки текущего пользователя */
+.participant-card.current-user .participant-avatar {
+    border-color: #48bb78;
+    box-shadow: 0 0 0 2px #48bb78;
+}
+
+/* Адаптивность для мобильных */
+@media (max-width: 480px) {
+    .participant-avatar {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+    }
+    
+    .participant-name {
+        font-size: 14px;
+    }
+    
+    .participant-status {
+        font-size: 11px;
     }
 }
