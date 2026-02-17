@@ -113,7 +113,7 @@ window.auth = (function() {
         // Загружаем аватар из Base64
         if (userSettings.avatar) {
             avatarPreview.textContent = '';
-            avatarPreview.style.backgroundImage = `url('${userSettings.avatar}')`;
+            avatarPreview.style.backgroundImage = 'url(\'' + userSettings.avatar + '\')';
             avatarPreview.style.backgroundSize = 'cover';
             avatarPreview.style.backgroundPosition = 'center';
         } else {
@@ -151,17 +151,21 @@ window.auth = (function() {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = error => reject(error);
+            reader.onload = function() {
+                resolve(reader.result);
+            };
+            reader.onerror = function(error) {
+                reject(error);
+            };
         });
     }
 
     // Оптимизация Base64 изображения (сжатие)
-    async function optimizeBase64Image(base64, maxWidth = 200, maxHeight = 200, quality = 0.7) {
+    async function optimizeBase64Image(base64, maxWidth, maxHeight, quality) {
         return new Promise((resolve) => {
             const img = new Image();
             img.src = base64;
-            img.onload = () => {
+            img.onload = function() {
                 const canvas = document.createElement('canvas');
                 let width = img.width;
                 let height = img.height;
@@ -185,7 +189,7 @@ window.auth = (function() {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // Конвертируем в JPEG с качеством 0.7
+                // Конвертируем в JPEG с качеством
                 const optimizedBase64 = canvas.toDataURL('image/jpeg', quality);
                 resolve(optimizedBase64);
             };
@@ -245,14 +249,14 @@ window.auth = (function() {
                 // Проверяем размер (максимум 100KB после оптимизации)
                 const sizeInKB = getBase64Size(base64) / 1024;
                 if (sizeInKB > 100) {
-                    showError(`Изображение слишком большое (${Math.round(sizeInKB)}KB). Максимум 100KB`);
+                    showError('Изображение слишком большое (' + Math.round(sizeInKB) + 'KB). Максимум 100KB');
                     saveButton.textContent = originalText;
                     saveButton.disabled = false;
                     return;
                 }
                 
                 avatarBase64 = base64;
-                console.log(`Avatar size: ${Math.round(sizeInKB)}KB`);
+                console.log('Avatar size: ' + Math.round(sizeInKB) + 'KB');
             }
 
             const newSettings = {
@@ -275,7 +279,7 @@ window.auth = (function() {
             
             // Обновляем отображаемое имя
             userDisplayName = newName;
-            if (displayNameSpan) displayNameSpan.textContent = `Привет, ${newName}!`;
+            if (displayNameSpan) displayNameSpan.textContent = 'Привет, ' + newName + '!';
             if (activeDisplayNameSpan) activeDisplayNameSpan.textContent = newName;
 
             // Применяем настройки аудио
@@ -322,7 +326,7 @@ window.auth = (function() {
         const reader = new FileReader();
         reader.onload = function(e) {
             avatarPreview.textContent = '';
-            avatarPreview.style.backgroundImage = `url('${e.target.result}')`;
+            avatarPreview.style.backgroundImage = 'url(\'' + e.target.result + '\')';
             avatarPreview.style.backgroundSize = 'cover';
             avatarPreview.style.backgroundPosition = 'center';
         };
@@ -351,7 +355,7 @@ window.auth = (function() {
                 });
             }
             
-            console.log(`Online status updated: ${online}`);
+            console.log('Online status updated: ' + online);
         } catch (error) {
             console.error('Error updating online status:', error);
         }
@@ -363,7 +367,7 @@ window.auth = (function() {
         
         updateOnlineStatus(true);
         
-        onlineHeartbeat = setInterval(() => {
+        onlineHeartbeat = setInterval(function() {
             if (currentUser && !document.hidden) {
                 updateOnlineStatus(true);
             }
@@ -402,7 +406,7 @@ window.auth = (function() {
     function handleVisibilityChange() {
         if (currentUser) {
             if (document.hidden) {
-                setTimeout(() => {
+                setTimeout(function() {
                     if (document.hidden && currentUser) {
                         updateOnlineStatus(false);
                     }
@@ -415,9 +419,9 @@ window.auth = (function() {
 
     function handleBeforeUnload() {
         if (currentUser) {
-            const url = `https://firestore.googleapis.com/v1/projects/${firebase.app().options.projectId}/databases/(default)/documents/users/${currentUser.uid}`;
+            var url = 'https://firestore.googleapis.com/v1/projects/' + firebase.app().options.projectId + '/databases/(default)/documents/users/' + currentUser.uid;
             
-            const offlineData = {
+            var offlineData = {
                 fields: {
                     online: { booleanValue: false },
                     lastSeen: { timestampValue: new Date().toISOString() }
@@ -481,7 +485,7 @@ window.auth = (function() {
     function startBanCheck(uid) {
         if (banCheckInterval) clearInterval(banCheckInterval);
         
-        banCheckInterval = setInterval(async () => {
+        banCheckInterval = setInterval(async function() {
             if (currentUser) {
                 const isBanned = await checkIfBanned(uid);
                 if (isBanned) {
@@ -496,8 +500,8 @@ window.auth = (function() {
             }
         }, 30000);
         
-        const unsubscribe = db.collection('users').doc(uid)
-            .onSnapshot(async (doc) => {
+        var unsubscribe = db.collection('users').doc(uid)
+            .onSnapshot(async function(doc) {
                 if (doc.exists) {
                     const userData = doc.data();
                     if (userData.banned) {
@@ -513,7 +517,7 @@ window.auth = (function() {
                         }
                     }
                 }
-            }, (error) => {
+            }, function(error) {
                 console.error('Ban listener error:', error);
             });
             
@@ -534,4 +538,229 @@ window.auth = (function() {
     // Show functions
     function showAuthContainer() {
         authContainer.classList.remove('hidden');
-        profileContainer.classList.add('
+        profileContainer.classList.add('hidden');
+        roomContainer.classList.add('hidden');
+        activeRoomContainer.classList.add('hidden');
+        settingsModal.classList.add('hidden');
+        clearMessages();
+        
+        if (currentUser) {
+            updateOnlineStatus(false);
+        }
+    }
+
+    function showProfileContainer() {
+        authContainer.classList.add('hidden');
+        profileContainer.classList.remove('hidden');
+        roomContainer.classList.add('hidden');
+        activeRoomContainer.classList.add('hidden');
+        settingsModal.classList.add('hidden');
+        clearMessages();
+        
+        if (currentUser && currentUser.email) {
+            var defaultName = currentUser.email.split('@')[0];
+            profileNameInput.value = defaultName;
+        }
+        
+        updateOnlineStatus(true);
+    }
+
+    function showRoomContainer(displayName) {
+        authContainer.classList.add('hidden');
+        profileContainer.classList.add('hidden');
+        roomContainer.classList.remove('hidden');
+        activeRoomContainer.classList.add('hidden');
+        settingsModal.classList.add('hidden');
+        
+        displayNameSpan.textContent = 'Привет, ' + displayName + '!';
+        activeDisplayNameSpan.textContent = displayName;
+        userDisplayName = displayName;
+        clearMessages();
+        
+        updateOnlineStatus(true);
+    }
+
+    function showActiveRoom() {
+        authContainer.classList.add('hidden');
+        profileContainer.classList.add('hidden');
+        roomContainer.classList.add('hidden');
+        activeRoomContainer.classList.remove('hidden');
+        settingsModal.classList.add('hidden');
+    }
+
+    function clearMessages() {
+        errorMessage.textContent = '';
+        successMessage.textContent = '';
+    }
+
+    function showError(text) {
+        errorMessage.textContent = text;
+        successMessage.textContent = '';
+        if (window.showNotification) {
+            window.showNotification(text, 'error');
+        }
+    }
+
+    function showSuccess(text) {
+        successMessage.textContent = text;
+        errorMessage.textContent = '';
+        if (window.showNotification) {
+            window.showNotification(text, 'success');
+        }
+    }
+
+    // Switch between login and signup
+    function switchAuthMode() {
+        isAuthModeLogin = !isAuthModeLogin;
+        if (isAuthModeLogin) {
+            authTitle.textContent = 'Вход в FulloChat';
+            authButton.textContent = 'Войти';
+            switchAuthButton.textContent = 'Создать аккаунт';
+            switchAuthText.textContent = 'Нет аккаунта? Зарегистрируйтесь';
+        } else {
+            authTitle.textContent = 'Регистрация в FulloChat';
+            authButton.textContent = 'Зарегистрироваться';
+            switchAuthButton.textContent = 'Войти';
+            switchAuthText.textContent = 'Уже есть аккаунт? Войдите';
+        }
+        clearMessages();
+    }
+
+    // Handle authentication
+    async function handleAuth() {
+        const email = emailInput.value.trim();
+        const password = passwordInput.value;
+
+        if (!email || !password) {
+            showError('Пожалуйста, заполните все поля');
+            return;
+        }
+
+        if (password.length < 6) {
+            showError('Пароль должен содержать минимум 6 символов');
+            return;
+        }
+
+        try {
+            if (isAuthModeLogin) {
+                await firebase.auth().signInWithEmailAndPassword(email, password);
+                showSuccess('Вход выполнен успешно!');
+            } else {
+                await firebase.auth().createUserWithEmailAndPassword(email, password);
+                showSuccess('Регистрация успешна! Заполните профиль.');
+            }
+        } catch (error) {
+            handleAuthError(error);
+        }
+    }
+
+    function handleAuthError(error) {
+        switch (error.code) {
+            case 'auth/invalid-email':
+                showError('Неверный формат email');
+                break;
+            case 'auth/user-disabled':
+                showError('Пользователь заблокирован');
+                break;
+            case 'auth/user-not-found':
+                showError('Пользователь не найден');
+                break;
+            case 'auth/wrong-password':
+                showError('Неверный пароль');
+                break;
+            case 'auth/email-already-in-use':
+                showError('Email уже используется');
+                break;
+            case 'auth/weak-password':
+                showError('Слишком простой пароль');
+                break;
+            default:
+                showError('Ошибка: ' + error.message);
+        }
+    }
+
+    // Save profile
+    async function saveProfile() {
+        const displayName = profileNameInput.value.trim();
+        
+        if (!displayName) {
+            showError('Пожалуйста, введите ваше имя');
+            return;
+        }
+
+        if (displayName.length > 30) {
+            showError('Имя не должно превышать 30 символов');
+            return;
+        }
+
+        try {
+            await db.collection('users').doc(currentUser.uid).set({
+                displayName: displayName,
+                email: currentUser.email,
+                profileCompleted: true,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                online: true,
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+                banned: false,
+                status: 'online',
+                notifyMessages: true,
+                notifyJoin: true,
+                notifyLeave: true,
+                micVolume: 80,
+                speakerVolume: 100,
+                avatar: null
+            });
+
+            userDisplayName = displayName;
+            showRoomContainer(displayName);
+            showSuccess('Профиль сохранен!');
+            
+            startOnlineHeartbeat();
+        } catch (error) {
+            showError('Ошибка сохранения профиля: ' + error.message);
+        }
+    }
+
+    // Logout
+    async function logout() {
+        try {
+            stopOnlineHeartbeat();
+            stopBanCheck();
+            
+            if (currentUser) {
+                await updateOnlineStatus(false);
+            }
+            
+            if (window.room && window.room.getCurrentRoom()) {
+                await window.room.leaveRoom();
+            }
+            
+            if (window.peer) {
+                window.peer.cleanup();
+            }
+            
+            await firebase.auth().signOut();
+            showSuccess('Выход выполнен');
+        } catch (error) {
+            showError('Ошибка выхода: ' + error.message);
+        }
+    }
+
+    // Public API
+    return {
+        handleAuth: handleAuth,
+        switchAuthMode: switchAuthMode,
+        saveProfile: saveProfile,
+        logout: logout,
+        showError: showError,
+        showSuccess: showSuccess,
+        showActiveRoom: showActiveRoom,
+        showSettings: showSettings,
+        hideSettings: hideSettings,
+        saveSettings: saveSettings,
+        getCurrentUser: function() { return currentUser; },
+        getUserDisplayName: function() { return userDisplayName; },
+        getUserSettings: function() { return userSettings; },
+        updateOnlineStatus: updateOnlineStatus
+    };
+})();
