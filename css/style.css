@@ -326,33 +326,6 @@ button.logout-btn:hover {
     font-weight: 500;
 }
 
-/* Контейнеры для удаленных видео */
-.remote-videos-container,
-.remote-screens-container {
-    margin: 20px 0;
-}
-
-.remote-videos-container:empty,
-.remote-screens-container:empty {
-    display: none;
-}
-
-.remote-video-wrapper,
-.remote-screen-wrapper {
-    background: #f7fafc;
-    border-radius: 15px;
-    padding: 15px;
-    margin-bottom: 15px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-}
-
-.remote-video,
-.remote-screen {
-    width: 100%;
-    border-radius: 10px;
-    background: #2d3748;
-}
-
 /* Стили для карточек участников */
 .participants-grid {
     display: grid;
@@ -370,6 +343,8 @@ button.logout-btn:hover {
     transition: transform 0.3s;
     position: relative;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .participant-card:hover {
@@ -470,10 +445,112 @@ button.logout-btn:hover {
     gap: 4px;
 }
 
-.camera-icon,
-.screen-icon {
-    margin-left: 5px;
-    font-size: 14px;
+/* Контейнер для видео в карточке */
+.participant-video-container {
+    width: 100%;
+    margin: 10px 0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #2d3748;
+    aspect-ratio: 16/9;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.participant-video-container:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+.participant-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #2d3748;
+}
+
+.participant-video.enlarged {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90vw;
+    height: 90vh;
+    object-fit: contain;
+    z-index: 1000;
+    background: black;
+    border-radius: 10px;
+    box-shadow: 0 0 50px rgba(0,0,0,0.5);
+}
+
+/* Контейнер для экрана в карточке */
+.participant-screen-container {
+    width: 100%;
+    margin: 10px 0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #2d3748;
+    aspect-ratio: 16/9;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.participant-screen-container:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+.participant-screen {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #2d3748;
+}
+
+.participant-screen.enlarged {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90vw;
+    height: 90vh;
+    object-fit: contain;
+    z-index: 1000;
+    background: black;
+    border-radius: 10px;
+    box-shadow: 0 0 50px rgba(0,0,0,0.5);
+}
+
+/* Кнопка увеличения видео */
+.enlarge-video-btn {
+    background: rgba(0,0,0,0.5);
+    color: white;
+    border: 2px solid white;
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.3s;
+    margin: 5px auto;
+    width: auto;
+    display: inline-block;
+}
+
+.enlarge-video-btn:hover {
+    background: rgba(0,0,0,0.8);
+    transform: scale(1.05);
+}
+
+.enlarge-video-btn.hidden {
+    display: none;
+}
+
+.participant-video-controls {
+    display: flex;
+    justify-content: center;
+    margin: 5px 0;
 }
 
 /* Для карточки текущего пользователя */
@@ -1049,143 +1126,4 @@ button.logout-btn:hover {
     
     .room-info button {
         width: 100%;
-    }
-    
-    .media-controls {
-        flex-direction: column;
-    }
-    
-    .mic-button,
-    .camera-button,
-    .screen-button {
-        width: 100%;
-    }
-    
-    .participant-controls {
-        flex-direction: column;
-    }
-    
-    .mute-btn, .kick-btn {
-        width: 100%;
-    }
-    
-    .host-buttons {
-        flex-direction: column;
-    }
-    
-    .delete-room-btn {
-        width: 100%;
-    }
-    
-    .message {
-        max-width: 90%;
-    }
-    
-    .chat-input-container {
-        flex-direction: column;
-    }
-    
-    .chat-send {
-        width: 100%;
-    }
-    
-    /* Модальное окно на мобильных */
-    .modal-content {
-        width: 95%;
-        margin: 10px;
-        max-height: 95vh;
-    }
-    
-    .modal-footer {
-        flex-direction: column;
-    }
-    
-    .modal-footer button {
-        width: 100%;
-    }
-    
-    .settings-range input[type="range"] {
-        width: 100%;
-        margin-bottom: 5px;
-    }
-    
-    .settings-range span {
-        display: block;
-        width: 100%;
-        text-align: center;
-    }
-    
-    .settings-btn {
-        width: 100%;
-    }
-    
-    .user-info {
-        flex-wrap: wrap;
-    }
-    
-    #localVideo,
-    #localScreen {
-        max-width: 100%;
-    }
-}
-
-/* Маленькие экраны */
-@media (max-width: 480px) {
-    h2 {
-        font-size: 24px;
-    }
-    
-    .room-code-number {
-        font-size: 20px;
-        letter-spacing: 2px;
-    }
-    
-    .participant-card {
-        padding: 15px;
-    }
-    
-    .participant-name {
-        font-size: 16px;
-    }
-    
-    .modal-header h3 {
-        font-size: 18px;
-    }
-    
-    .avatar-preview {
-        width: 80px;
-        height: 80px;
-        font-size: 40px;
-    }
-    
-    .participant-avatar {
-        width: 40px;
-        height: 40px;
-        font-size: 16px;
-    }
-    
-    .participant-name {
-        font-size: 14px;
-    }
-    
-    .participant-status {
-        font-size: 11px;
-    }
-}
-
-/* Печать */
-@media print {
-    body {
-        background: white;
-        padding: 0;
-    }
-    
-    .container {
-        box-shadow: none;
-        padding: 10px;
-    }
-    
-    button, .media-controls, .chat-input-container {
-        display: none;
-    }
-}
+  
