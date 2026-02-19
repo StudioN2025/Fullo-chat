@@ -5,8 +5,6 @@ window.peer = (function() {
     let cameraStream = null;
     let peerConnections = new Map();
     let remoteAudioElements = new Map();
-    let remoteVideoElements = new Map();
-    let remoteScreenElements = new Map();
     let micEnabled = true;
     let cameraEnabled = false;
     let screenSharing = false;
@@ -121,7 +119,16 @@ window.peer = (function() {
                 cameraEnabled = false;
                 
                 // Скрываем локальное видео
-                if (localVideo) localVideo.style.display = 'none';
+                if (localVideo) {
+                    localVideo.srcObject = null;
+                    localVideoContainer.classList.add('hidden');
+                }
+                
+                // Удаляем видео из своей карточки
+                const videoContainer = document.getElementById('video-container-' + userId);
+                if (videoContainer) {
+                    videoContainer.innerHTML = '';
+                }
             } else {
                 // Включаем камеру
                 cameraStream = await navigator.mediaDevices.getUserMedia({ 
@@ -138,7 +145,21 @@ window.peer = (function() {
                 // Показываем локальное видео
                 if (localVideo) {
                     localVideo.srcObject = cameraStream;
-                    localVideo.style.display = 'block';
+                    localVideoContainer.classList.remove('hidden');
+                }
+                
+                // Добавляем видео в свою карточку
+                const videoContainer = document.getElementById('video-container-' + userId);
+                if (videoContainer) {
+                    videoContainer.innerHTML = '';
+                    const video = document.createElement('video');
+                    video.srcObject = cameraStream;
+                    video.autoplay = true;
+                    video.playsInline = true;
+                    video.muted = true;
+                    video.id = 'video-' + userId;
+                    video.className = 'participant-video';
+                    videoContainer.appendChild(video);
                 }
                 
                 // Добавляем видео-треки ко всем существующим соединениям
@@ -155,6 +176,11 @@ window.peer = (function() {
             }
             
             updateCameraButton();
+            
+            // Обновляем статус камеры в participants
+            await db.collection('rooms').doc(currentRoom).collection('participants').doc(userId).update({
+                camera: cameraEnabled
+            });
             
             // Уведомляем всех участников об изменении статуса камеры
             broadcastSignal('camera-status', { enabled: cameraEnabled });
@@ -182,7 +208,16 @@ window.peer = (function() {
                 screenSharing = false;
                 
                 // Скрываем локальный экран
-                if (localScreen) localScreen.style.display = 'none';
+                if (localScreen) {
+                    localScreen.srcObject = null;
+                    localScreenContainer.classList.add('hidden');
+                }
+                
+                // Удаляем экран из своей карточки
+                const screenContainer = document.getElementById('screen-container-' + userId);
+                if (screenContainer) {
+                    screenContainer.innerHTML = '';
+                }
             } else {
                 // Включаем демонстрацию экрана
                 screenStream = await navigator.mediaDevices.getDisplayMedia({ 
@@ -197,7 +232,21 @@ window.peer = (function() {
                 // Показываем локальный экран
                 if (localScreen) {
                     localScreen.srcObject = screenStream;
-                    localScreen.style.display = 'block';
+                    localScreenContainer.classList.remove('hidden');
+                }
+                
+                // Добавляем экран в свою карточку
+                const screenContainer = document.getElementById('screen-container-' + userId);
+                if (screenContainer) {
+                    screenContainer.innerHTML = '';
+                    const video = document.createElement('video');
+                    video.srcObject = screenStream;
+                    video.autoplay = true;
+                    video.playsInline = true;
+                    video.muted = true;
+                    video.id = 'screen-' + userId;
+                    video.className = 'participant-screen';
+                    screenContainer.appendChild(video);
                 }
                 
                 // Добавляем экранные треки ко всем существующим соединениям
@@ -219,6 +268,11 @@ window.peer = (function() {
             }
             
             updateScreenButton();
+            
+            // Обновляем статус демонстрации в participants
+            await db.collection('rooms').doc(currentRoom).collection('participants').doc(userId).update({
+                screen: screenSharing
+            });
             
             // Уведомляем всех участников об изменении статуса демонстрации
             broadcastSignal('screen-status', { enabled: screenSharing });
@@ -256,7 +310,7 @@ window.peer = (function() {
                     type: type,
                     data: data,
                     timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                    encrypted: true // Помечаем как зашифрованное
+                    encrypted: true
                 });
         } catch (error) {
             console.error('Error sending signal:', error);
@@ -349,9 +403,15 @@ window.peer = (function() {
     function updateParticipantCamera(participantId, enabled) {
         const card = document.getElementById('participant-' + participantId);
         if (card) {
-            const cameraIcon = card.querySelector('.camera-icon');
-            if (cameraIcon) {
-                cameraIcon.textContent = enabled ? '📷' : '';
+            const statusDiv = card.querySelector('.participant-status');
+            if (statusDiv) {
+                if (enabled) {
+                    if (!statusDiv.innerHTML.includes('📷')) {
+                        statusDiv.innerHTML += ' 📷';
+                    }
+                } else {
+                    statusDiv.innerHTML = statusDiv.innerHTML.replace(' 📷', '');
+                }
             }
         }
     }
@@ -360,9 +420,15 @@ window.peer = (function() {
     function updateParticipantScreen(participantId, enabled) {
         const card = document.getElementById('participant-' + participantId);
         if (card) {
-            const screenIcon = card.querySelector('.screen-icon');
-            if (screenIcon) {
-                screenIcon.textContent = enabled ? '🖥️' : '';
+            const statusDiv = card.querySelector('.participant-status');
+            if (statusDiv) {
+                if (enabled) {
+                    if (!statusDiv.innerHTML.includes('🖥️')) {
+                        statusDiv.innerHTML += ' 🖥️';
+                    }
+                } else {
+                    statusDiv.innerHTML = statusDiv.innerHTML.replace(' 🖥️', '');
+                }
             }
         }
     }
@@ -447,487 +513,4 @@ window.peer = (function() {
                         },
                         timestamp: firebase.firestore.FieldValue.serverTimestamp()
                     }).catch(function(err) { 
-                        console.error('Error sending ICE candidate:', err);
-                    });
-            }
-        };
-
-        // Handle connection state
-        pc.onconnectionstatechange = function() {
-            console.log('Connection state to', targetUserId, ':', pc.connectionState);
-            if (pc.connectionState === 'connected') {
-                console.log('Successfully connected to:', targetUserId);
-                window.auth.showSuccess('Подключен к участнику');
-            } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-                console.log('Connection lost to:', targetUserId);
-            }
-        };
-
-        // Handle ICE connection state
-        pc.oniceconnectionstatechange = function() {
-            console.log('ICE connection state to', targetUserId, ':', pc.iceConnectionState);
-        };
-
-        // Handle remote stream
-        pc.ontrack = function(event) {
-            console.log('Received remote stream from:', targetUserId);
-            console.log('Stream tracks:', event.streams[0].getTracks().length);
-            
-            // Определяем тип потока (аудио, видео, экран)
-            const hasVideo = event.streams[0].getVideoTracks().length > 0;
-            const isScreen = event.track && event.track.kind === 'video' && 
-                            event.track.label && event.track.label.includes('screen');
-            
-            if (!hasVideo) {
-                // Только аудио
-                addRemoteAudio(targetUserId, event.streams[0]);
-            } else if (isScreen) {
-                // Демонстрация экрана
-                addRemoteScreen(targetUserId, event.streams[0]);
-            } else {
-                // Видео с камеры
-                addRemoteVideo(targetUserId, event.streams[0]);
-            }
-        };
-
-        // Store connection
-        peerConnections.set(targetUserId, { pc: pc });
-
-        return pc;
-    }
-
-    // Add remote audio
-    function addRemoteAudio(userId, stream) {
-        // Remove existing audio if any
-        const oldAudio = remoteAudioElements.get(userId);
-        if (oldAudio) {
-            oldAudio.remove();
-        }
-
-        const audio = document.createElement('audio');
-        audio.srcObject = stream;
-        audio.autoplay = true;
-        audio.id = 'audio-' + userId;
-        audio.style.display = 'none';
-        document.body.appendChild(audio);
-        
-        // Устанавливаем громкость из настроек
-        const userSettings = window.auth?.getUserSettings?.();
-        if (userSettings) {
-            audio.volume = userSettings.speakerVolume / 100;
-        }
-
-        remoteAudioElements.set(userId, audio);
-        
-        audio.play().catch(function(e) { 
-            console.log('Audio play error:', e);
-        });
-        
-        console.log('Remote audio added for user:', userId);
-    }
-
-    // Add remote video
-    function addRemoteVideo(userId, stream) {
-        // Check if video container exists
-        let videoContainer = document.getElementById('remote-videos');
-        if (!videoContainer) {
-            videoContainer = document.createElement('div');
-            videoContainer.id = 'remote-videos';
-            videoContainer.className = 'remote-videos-grid';
-            document.querySelector('.participants-grid').after(videoContainer);
-        }
-        
-        // Remove existing video if any
-        const oldVideo = remoteVideoElements.get(userId);
-        if (oldVideo) {
-            oldVideo.remove();
-        }
-
-        const videoWrapper = document.createElement('div');
-        videoWrapper.className = 'remote-video-wrapper';
-        videoWrapper.id = 'video-wrapper-' + userId;
-        
-        const video = document.createElement('video');
-        video.srcObject = stream;
-        video.autoplay = true;
-        video.playsInline = true;
-        video.className = 'remote-video';
-        
-        const label = document.createElement('div');
-        label.className = 'video-label';
-        label.textContent = getUserDisplayName(userId) + ' (камера)';
-        
-        videoWrapper.appendChild(video);
-        videoWrapper.appendChild(label);
-        videoContainer.appendChild(videoWrapper);
-
-        remoteVideoElements.set(userId, videoWrapper);
-        
-        console.log('Remote video added for user:', userId);
-    }
-
-    // Add remote screen
-    function addRemoteScreen(userId, stream) {
-        // Check if screen container exists
-        let screenContainer = document.getElementById('remote-screens');
-        if (!screenContainer) {
-            screenContainer = document.createElement('div');
-            screenContainer.id = 'remote-screens';
-            screenContainer.className = 'remote-screens-grid';
-            document.querySelector('.participants-grid').after(screenContainer);
-        }
-        
-        // Remove existing screen if any
-        const oldScreen = remoteScreenElements.get(userId);
-        if (oldScreen) {
-            oldScreen.remove();
-        }
-
-        const screenWrapper = document.createElement('div');
-        screenWrapper.className = 'remote-screen-wrapper';
-        screenWrapper.id = 'screen-wrapper-' + userId;
-        
-        const video = document.createElement('video');
-        video.srcObject = stream;
-        video.autoplay = true;
-        video.playsInline = true;
-        video.className = 'remote-screen';
-        
-        const label = document.createElement('div');
-        label.className = 'screen-label';
-        label.textContent = getUserDisplayName(userId) + ' (экран)';
-        
-        screenWrapper.appendChild(video);
-        screenWrapper.appendChild(label);
-        screenContainer.appendChild(screenWrapper);
-
-        remoteScreenElements.set(userId, screenWrapper);
-        
-        console.log('Remote screen added for user:', userId);
-    }
-
-    // Get user display name by ID
-    function getUserDisplayName(userId) {
-        // Пытаемся получить из UI
-        const card = document.getElementById('participant-' + userId);
-        if (card) {
-            const nameDiv = card.querySelector('.participant-name');
-            if (nameDiv) {
-                return nameDiv.textContent.replace('👑', '').replace('(Вы)', '').trim();
-            }
-        }
-        return 'Участник';
-    }
-
-    // Handle offer
-    async function handleOffer(fromUserId, offerObj) {
-        if (!currentRoom || !userId) {
-            console.log('No room or user, ignoring offer');
-            return;
-        }
-        
-        console.log('Handling offer from:', fromUserId);
-        
-        try {
-            const pc = createPeerConnection(fromUserId);
-            
-            await pc.setRemoteDescription(new RTCSessionDescription(offerObj));
-            console.log('Remote description set from offer');
-            
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            console.log('Local description set as answer');
-            
-            // Send answer
-            await db.collection('rooms').doc(currentRoom)
-                .collection('signaling')
-                .add({
-                    from: userId,
-                    target: fromUserId,
-                    type: 'answer',
-                    answer: {
-                        type: answer.type,
-                        sdp: answer.sdp
-                    },
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            
-            console.log('Answer sent to:', fromUserId);
-            
-            // Add pending candidates
-            const candidates = pendingCandidates.get(fromUserId);
-            if (candidates) {
-                for (const candidate of candidates) {
-                    await pc.addIceCandidate(candidate);
-                }
-                pendingCandidates.delete(fromUserId);
-                console.log('Added pending ICE candidates');
-            }
-        } catch (error) {
-            console.error('Error handling offer:', error);
-        }
-    }
-
-    // Handle answer
-    async function handleAnswer(fromUserId, answerObj) {
-        console.log('Handling answer from:', fromUserId);
-        
-        try {
-            const peerConnection = peerConnections.get(fromUserId);
-            if (!peerConnection || !peerConnection.pc) {
-                console.error('No peer connection for:', fromUserId);
-                return;
-            }
-            
-            await peerConnection.pc.setRemoteDescription(new RTCSessionDescription(answerObj));
-            console.log('Remote description set from answer');
-            
-            const candidates = pendingCandidates.get(fromUserId);
-            if (candidates) {
-                for (const candidate of candidates) {
-                    await peerConnection.pc.addIceCandidate(candidate);
-                }
-                pendingCandidates.delete(fromUserId);
-                console.log('Added pending ICE candidates');
-            }
-        } catch (error) {
-            console.error('Error handling answer:', error);
-        }
-    }
-
-    // Connect to peer
-    async function connectToPeer(targetUserId) {
-        if (!currentRoom || !userId || targetUserId === userId) {
-            console.log('Cannot connect to self or invalid room');
-            return;
-        }
-
-        if (peerConnections.has(targetUserId)) {
-            console.log('Already have connection to:', targetUserId);
-            return;
-        }
-
-        console.log('Initiating connection to:', targetUserId);
-
-        try {
-            const pc = createPeerConnection(targetUserId);
-            
-            const offer = await pc.createOffer({
-                offerToReceiveAudio: true,
-                offerToReceiveVideo: true
-            });
-            
-            await pc.setLocalDescription(offer);
-            console.log('Local description set as offer');
-            
-            // Send offer
-            await db.collection('rooms').doc(currentRoom)
-                .collection('signaling')
-                .add({
-                    from: userId,
-                    target: targetUserId,
-                    type: 'offer',
-                    offer: {
-                        type: offer.type,
-                        sdp: offer.sdp
-                    },
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            
-            console.log('Offer sent to:', targetUserId);
-        } catch (error) {
-            console.error('Error connecting to peer:', error);
-        }
-    }
-
-    // Update mic button state
-    function updateMicButton() {
-        if (micToggleButton) {
-            micToggleButton.textContent = micEnabled ? '🎤 Микрофон вкл' : '🔇 Микрофон выкл';
-            micToggleButton.classList.toggle('muted', !micEnabled);
-        }
-    }
-
-    // Toggle microphone
-    function toggleMic() {
-        if (!localStream) return;
-
-        micEnabled = !micEnabled;
-        if (localStream.getAudioTracks().length > 0) {
-            localStream.getAudioTracks()[0].enabled = micEnabled;
-        }
-        updateMicButton();
-
-        if (currentRoom && userId) {
-            db.collection('rooms').doc(currentRoom).collection('participants')
-                .doc(userId)
-                .update({ 
-                    muted: !micEnabled,
-                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                })
-                .catch(console.error);
-        }
-    }
-
-    // Send message
-    function sendMessage() {
-        const message = chatInput.value.trim();
-        if (!message) return;
-
-        addMessage(userName, message, true);
-
-        if (currentRoom && userId) {
-            db.collection('rooms').doc(currentRoom).collection('messages').add({
-                senderId: userId,
-                senderName: userName,
-                message: message,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                encrypted: true
-            }).catch(console.error);
-        }
-
-        chatInput.value = '';
-    }
-
-    function addMessage(sender, message, isOwn) {
-        if (!chatMessages) return;
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message';
-        if (isOwn) {
-            messageDiv.classList.add('own-message');
-        }
-        messageDiv.innerHTML = '<span class="message-sender">' + sender + ':</span> <span class="message-text">' + message + '</span>';
-        chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-        
-        // Воспроизводим звук уведомления если не свое сообщение
-        if (!isOwn) {
-            playNotificationSound();
-        }
-    }
-
-    function playNotificationSound() {
-        const userSettings = window.auth?.getUserSettings?.();
-        if (userSettings && userSettings.notifyMessages) {
-            // Здесь можно добавить звук уведомления
-            console.log('New message notification');
-        }
-    }
-
-    function setCurrentRoom(roomId) {
-        currentRoom = roomId;
-        if (userId) {
-            listenForSignaling();
-        }
-    }
-
-    function closeConnection(userId) {
-        const connection = peerConnections.get(userId);
-        if (connection && connection.pc) {
-            connection.pc.close();
-            peerConnections.delete(userId);
-        }
-        
-        const audio = remoteAudioElements.get(userId);
-        if (audio) {
-            audio.pause();
-            audio.srcObject = null;
-            audio.remove();
-            remoteAudioElements.delete(userId);
-        }
-        
-        const video = remoteVideoElements.get(userId);
-        if (video) {
-            video.remove();
-            remoteVideoElements.delete(userId);
-        }
-        
-        const screen = remoteScreenElements.get(userId);
-        if (screen) {
-            screen.remove();
-            remoteScreenElements.delete(userId);
-        }
-        
-        console.log('Closed connection to user:', userId);
-    }
-
-    function cleanup() {
-        console.log('Cleaning up WebRTC connections');
-        
-        peerConnections.forEach(function(connection, userId) {
-            if (connection.pc) {
-                connection.pc.close();
-            }
-        });
-        peerConnections.clear();
-        
-        remoteAudioElements.forEach(function(audio, userId) {
-            audio.pause();
-            audio.srcObject = null;
-            audio.remove();
-        });
-        remoteAudioElements.clear();
-        
-        remoteVideoElements.forEach(function(video, userId) {
-            video.remove();
-        });
-        remoteVideoElements.clear();
-        
-        remoteScreenElements.forEach(function(screen, userId) {
-            screen.remove();
-        });
-        remoteScreenElements.clear();
-        
-        if (localStream) {
-            localStream.getTracks().forEach(function(track) {
-                track.stop();
-            });
-            localStream = null;
-        }
-        
-        if (cameraStream) {
-            cameraStream.getTracks().forEach(function(track) {
-                track.stop();
-            });
-            cameraStream = null;
-        }
-        
-        if (screenStream) {
-            screenStream.getTracks().forEach(function(track) {
-                track.stop();
-            });
-            screenStream = null;
-        }
-        
-        if (audioContext) {
-            audioContext.close();
-            audioContext = null;
-        }
-        
-        micGainNode = null;
-        pendingCandidates.clear();
-        currentRoom = null;
-        userId = null;
-        cameraEnabled = false;
-        screenSharing = false;
-    }
-
-    // Public API
-    return {
-        init: init,
-        connectToPeer: connectToPeer,
-        toggleMic: toggleMic,
-        toggleCamera: toggleCamera,
-        toggleScreenShare: toggleScreenShare,
-        sendMessage: sendMessage,
-        addMessage: addMessage,
-        setCurrentRoom: setCurrentRoom,
-        closeConnection: closeConnection,
-        cleanup: cleanup,
-        setVolume: setVolume,
-        isMicEnabled: function() { return micEnabled; },
-        isCameraEnabled: function() { return cameraEnabled; },
-        isScreenSharing: function() { return screenSharing; }
-    };
-})();
+                        console.
