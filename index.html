@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FulloChat - P2P Аудиочат</title>
+    <title>FulloChat - P2P Аудио/Видео чат</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -82,16 +82,41 @@
                 <div class="room-code-number" id="roomCodeDisplay"></div>
             </div>
 
-            <div class="mic-control">
+            <div class="encryption-badge" id="encryptionBadge">
+                🔒 Сквозное шифрование активно
+            </div>
+
+            <div class="media-controls">
                 <button id="micToggleButton" class="mic-button" onclick="window.peer.toggleMic()">
-                    🎤 Микрофон включен
+                    🎤 Микрофон вкл
                 </button>
+                <button id="cameraToggleButton" class="camera-button" onclick="window.peer.toggleCamera()">
+                    📷 Камера выкл
+                </button>
+                <button id="screenShareButton" class="screen-button" onclick="window.peer.toggleScreenShare()">
+                    🖥️ Поделиться экраном
+                </button>
+            </div>
+
+            <!-- Локальное видео -->
+            <div id="localVideoContainer" class="local-video-container hidden">
+                <video id="localVideo" autoplay playsinline muted></video>
+                <div class="video-label">Ваша камера</div>
+            </div>
+
+            <div id="localScreenContainer" class="local-screen-container hidden">
+                <video id="localScreen" autoplay playsinline muted></video>
+                <div class="screen-label">Ваш экран</div>
             </div>
 
             <h3 class="section-title">Участники (<span id="participantsCount">0</span>)</h3>
             <div id="participantsContainer" class="participants-grid">
                 <!-- Участники будут добавляться сюда -->
             </div>
+
+            <!-- Удаленные видео будут добавляться сюда динамически -->
+            <div id="remoteVideosContainer" class="remote-videos-container"></div>
+            <div id="remoteScreensContainer" class="remote-screens-container"></div>
 
             <!-- Панель управления для создателя -->
             <div id="hostControls" class="host-controls hidden">
@@ -107,7 +132,7 @@
                 <h3 class="section-title">Чат комнаты</h3>
                 <div id="chatMessages" class="chat-messages"></div>
                 <div class="chat-input-container">
-                    <input type="text" id="chatInput" class="chat-input" placeholder="Введите сообщение..." onkeypress="if(event.key === 'Enter') window.peer.sendMessage()">
+                    <input type="text" id="chatInput" class="chat-input" placeholder="Введите сообщение... (🔒 зашифровано)" onkeypress="if(event.key === 'Enter') window.peer.sendMessage()">
                     <button class="chat-send" onclick="window.peer.sendMessage()">📤 Отправить</button>
                 </div>
             </div>
@@ -189,10 +214,19 @@
                 </div>
 
                 <div class="settings-section">
+                    <h4>Безопасность</h4>
+                    <div class="security-info">
+                        <p>🔒 Все сообщения и медиа-потоки шифруются</p>
+                        <p>🛡️ P2P соединение (без серверов)</p>
+                        <p>🔐 Сквозное шифрование (E2EE)</p>
+                    </div>
+                </div>
+
+                <div class="settings-section">
                     <h4>О программе</h4>
                     <div class="about-info">
-                        <p><strong>FulloChat</strong> v1.0.0</p>
-                        <p>P2P аудиочат с шифрованием</p>
+                        <p><strong>FulloChat</strong> v2.0.0</p>
+                        <p>P2P аудио/видео чат с шифрованием</p>
                         <p>Разработано для кружка информатики</p>
                     </div>
                 </div>
@@ -208,7 +242,6 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
     
     <!-- PeerJS для P2P соединений -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
@@ -242,15 +275,15 @@
         });
 
         // Система уведомлений
-        function showNotification(message, type = 'info') {
+        function showNotification(message, type) {
             const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
+            notification.className = 'notification ' + type;
             notification.textContent = message;
             document.body.appendChild(notification);
             
-            setTimeout(() => {
+            setTimeout(function() {
                 notification.style.animation = 'slideIn 0.3s reverse';
-                setTimeout(() => notification.remove(), 300);
+                setTimeout(function() { notification.remove(); }, 300);
             }, 3000);
         }
 
@@ -341,7 +374,7 @@
                         }
                     }
                 }
-                keysToRemove.forEach(key => localStorage.removeItem(key));
+                keysToRemove.forEach(function(key) { localStorage.removeItem(key); });
             }
         });
 
@@ -378,7 +411,7 @@
                 db.collection('rooms').doc(lastRoom).collection('participants').doc(user.uid).update({
                     online: false,
                     leftAt: firebase.firestore.FieldValue.serverTimestamp()
-                }).catch(() => {});
+                }).catch(function() {});
             }
         }
     });
