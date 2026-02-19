@@ -177,6 +177,20 @@ button.logout-btn:hover {
     letter-spacing: 2px;
 }
 
+/* Бейдж шифрования */
+.encryption-badge {
+    background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 50px;
+    display: inline-block;
+    margin: 10px auto 20px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 4px 10px rgba(72, 187, 120, 0.3);
+    text-align: center;
+}
+
 /* Стили для уведомлений */
 .notification {
     position: fixed;
@@ -229,33 +243,114 @@ button.logout-btn:hover {
     to { transform: rotate(360deg); }
 }
 
-/* Стили для статуса микрофона */
+/* Медиа-контролы */
+.media-controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 20px 0;
+    flex-wrap: wrap;
+}
+
+.mic-button, .camera-button, .screen-button {
+    width: auto;
+    padding: 12px 24px;
+    font-size: 16px;
+    border-radius: 50px;
+    transition: all 0.3s;
+    margin: 0;
+}
+
 .mic-button {
     background: #48bb78;
-    margin: 20px auto;
-    padding: 15px 30px;
-    width: auto;
-    display: inline-block;
-    border: none;
-    border-radius: 50px;
-    font-size: 18px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
 }
 
 .mic-button.muted {
     background: #f56565;
 }
 
-.mic-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+.camera-button {
+    background: #4299e1;
 }
 
-.mic-control {
-    text-align: center;
+.camera-button:hover {
+    background: #3182ce;
+}
+
+.camera-button.active {
+    background: #48bb78;
+}
+
+.screen-button {
+    background: #9f7aea;
+}
+
+.screen-button:hover {
+    background: #805ad5;
+}
+
+.screen-button.active {
+    background: #48bb78;
+}
+
+/* Видео-контейнеры */
+.local-video-container,
+.local-screen-container {
     margin: 20px 0;
+    padding: 15px;
+    background: #f7fafc;
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.local-video-container.hidden,
+.local-screen-container.hidden {
+    display: none;
+}
+
+#localVideo,
+#localScreen {
+    width: 100%;
+    max-width: 400px;
+    border-radius: 10px;
+    background: #2d3748;
+    margin: 0 auto;
+    display: block;
+}
+
+.video-label,
+.screen-label {
+    text-align: center;
+    margin-top: 10px;
+    color: #4a5568;
+    font-weight: 500;
+}
+
+/* Контейнеры для удаленных видео */
+.remote-videos-container,
+.remote-screens-container {
+    margin: 20px 0;
+}
+
+.remote-videos-container:empty,
+.remote-screens-container:empty {
+    display: none;
+}
+
+.remote-video-wrapper,
+.remote-screen-wrapper {
+    background: #f7fafc;
+    border-radius: 15px;
+    padding: 15px;
+    margin-bottom: 15px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.remote-video,
+.remote-screen {
+    width: 100%;
+    border-radius: 10px;
+    background: #2d3748;
 }
 
 /* Стили для карточек участников */
@@ -315,29 +410,76 @@ button.logout-btn:hover {
     display: inline-block;
 }
 
-.participant-name {
-    font-size: 18px;
-    font-weight: 600;
+/* Стили для аватарок в списке участников */
+.participant-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     margin-bottom: 10px;
+}
+
+.participant-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background-size: cover;
+    background-position: center;
+    border: 2px solid white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    flex-shrink: 0;
+}
+
+.participant-avatar.default-avatar {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    flex-wrap: wrap;
+    color: white;
+    font-size: 20px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.participant-name-container {
+    flex: 1;
+    min-width: 0;
+}
+
+.participant-name {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.current-user-badge {
+    font-size: 11px;
+    background: rgba(255,255,255,0.2);
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 5px;
 }
 
 .participant-status {
-    font-size: 14px;
+    font-size: 12px;
     opacity: 0.9;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 5px;
-    margin-bottom: 10px;
+    gap: 4px;
 }
 
-.participant-status.muted {
-    opacity: 0.6;
+.camera-icon,
+.screen-icon {
+    margin-left: 5px;
+    font-size: 14px;
+}
+
+/* Для карточки текущего пользователя */
+.participant-card.current-user .participant-avatar {
+    border-color: #48bb78;
+    box-shadow: 0 0 0 2px #48bb78;
 }
 
 .participant-controls {
@@ -823,6 +965,25 @@ button.logout-btn:hover {
     font-weight: 600;
 }
 
+.security-info {
+    background: #ebf8ff;
+    padding: 15px;
+    border-radius: 10px;
+    border-left: 4px solid #4299e1;
+}
+
+.security-info p {
+    margin-bottom: 8px;
+    color: #2c5282;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.security-info p:last-child {
+    margin-bottom: 0;
+}
+
 .about-info {
     background: #f7fafc;
     padding: 15px;
@@ -890,7 +1051,13 @@ button.logout-btn:hover {
         width: 100%;
     }
     
-    .mic-button {
+    .media-controls {
+        flex-direction: column;
+    }
+    
+    .mic-button,
+    .camera-button,
+    .screen-button {
         width: 100%;
     }
     
@@ -948,12 +1115,17 @@ button.logout-btn:hover {
         text-align: center;
     }
     
-       .settings-btn {
+    .settings-btn {
         width: 100%;
     }
     
     .user-info {
         flex-wrap: wrap;
+    }
+    
+    #localVideo,
+    #localScreen {
+        max-width: 100%;
     }
 }
 
@@ -985,6 +1157,20 @@ button.logout-btn:hover {
         height: 80px;
         font-size: 40px;
     }
+    
+    .participant-avatar {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+    }
+    
+    .participant-name {
+        font-size: 14px;
+    }
+    
+    .participant-status {
+        font-size: 11px;
+    }
 }
 
 /* Печать */
@@ -999,90 +1185,7 @@ button.logout-btn:hover {
         padding: 10px;
     }
     
-    button, .mic-control, .chat-input-container {
+    button, .media-controls, .chat-input-container {
         display: none;
-    }
-}
-
-/* Стили для аватарок в списке участников */
-.participant-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 10px;
-}
-
-.participant-avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    background-size: cover;
-    background-position: center;
-    border: 2px solid white;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-    flex-shrink: 0;
-}
-
-.participant-avatar.default-avatar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 20px;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-
-.participant-name-container {
-    flex: 1;
-    min-width: 0;
-}
-
-.participant-name {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.current-user-badge {
-    font-size: 11px;
-    background: rgba(255,255,255,0.2);
-    padding: 2px 6px;
-    border-radius: 10px;
-    margin-left: 5px;
-}
-
-.participant-status {
-    font-size: 12px;
-    opacity: 0.9;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-/* Для карточки текущего пользователя */
-.participant-card.current-user .participant-avatar {
-    border-color: #48bb78;
-    box-shadow: 0 0 0 2px #48bb78;
-}
-
-/* Адаптивность для мобильных */
-@media (max-width: 480px) {
-    .participant-avatar {
-        width: 40px;
-        height: 40px;
-        font-size: 16px;
-    }
-    
-    .participant-name {
-        font-size: 14px;
-    }
-    
-    .participant-status {
-        font-size: 11px;
     }
 }
