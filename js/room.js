@@ -24,6 +24,9 @@ window.room = (function() {
     const participantsCount = document.getElementById('participantsCount');
     const roomContainer = document.getElementById('roomContainer');
     const activeRoomContainer = document.getElementById('activeRoomContainer');
+    const encryptionBadge = document.getElementById('encryptionBadge');
+    const localVideoContainer = document.getElementById('localVideoContainer');
+    const localScreenContainer = document.getElementById('localScreenContainer');
 
     // Проверка бана перед действиями
     async function checkBanBeforeAction() {
@@ -90,13 +93,14 @@ window.room = (function() {
                 participants: [user.uid],
                 active: true,
                 lastActive: firebase.firestore.FieldValue.serverTimestamp(),
-                createdBy: user.uid
+                createdBy: user.uid,
+                encrypted: true
             });
 
             currentRoom = roomRef.id;
             isHost = true;
 
-            // Обновляем текущую комнату пользователя (онлайн статус остается true)
+            // Обновляем текущую комнату пользователя
             await db.collection('users').doc(user.uid).update({
                 currentRoom: currentRoom,
                 online: true,
@@ -112,7 +116,9 @@ window.room = (function() {
                 isHost: true,
                 online: true,
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                muted: false
+                muted: false,
+                camera: false,
+                screen: false
             });
 
             // Initialize WebRTC
@@ -213,7 +219,7 @@ window.room = (function() {
             const displayName = userDoc.data().displayName;
             const avatar = userDoc.data().avatar || null;
 
-            // Обновляем текущую комнату пользователя (онлайн статус остается true)
+            // Обновляем текущую комнату пользователя
             await db.collection('users').doc(user.uid).update({
                 currentRoom: currentRoom,
                 online: true,
@@ -242,7 +248,9 @@ window.room = (function() {
                     isHost: isHost,
                     online: true,
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
-                    muted: false
+                    muted: false,
+                    camera: false,
+                    screen: false
                 });
             }
 
@@ -335,17 +343,26 @@ window.room = (function() {
             window.peer.cleanup();
         }
 
-        // Обновляем статус пользователя (онлайн на сайте остается)
+        // Обновляем статус пользователя
         if (currentUser) {
             db.collection('users').doc(currentUser.uid).update({
                 currentRoom: null,
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                // online не трогаем - пользователь все еще на сайте
             }).catch(console.error);
         }
 
+        // Скрываем видео
+        if (localVideoContainer) localVideoContainer.classList.add('hidden');
+        if (localScreenContainer) localScreenContainer.classList.add('hidden');
+
         if (participantsContainer) participantsContainer.innerHTML = '';
         if (chatMessages) chatMessages.innerHTML = '';
+        
+        // Удаляем контейнеры с видео
+        const remoteVideos = document.getElementById('remoteVideosContainer');
+        const remoteScreens = document.getElementById('remoteScreensContainer');
+        if (remoteVideos) remoteVideos.innerHTML = '';
+        if (remoteScreens) remoteScreens.innerHTML = '';
         
         currentRoom = null;
         roomCode = null;
@@ -441,11 +458,10 @@ window.room = (function() {
         if (currentRoom && user && !leaveInProgress && !wasKicked) {
             leaveInProgress = true;
             
-            // Обновляем статус в users (онлайн на сайте останется через heartbeat из auth.js)
+            // Обновляем статус в users
             db.collection('users').doc(user.uid).update({
                 currentRoom: null,
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                // online не трогаем - auth.js сам обновит
             }).catch(console.error);
             
             const url = 'https://firestore.googleapis.com/v1/projects/' + firebase.app().options.projectId + '/databases/(default)/documents/rooms/' + currentRoom + '/participants/' + user.uid;
@@ -641,6 +657,8 @@ window.room = (function() {
         const isCurrentUser = userId === firebase.auth().currentUser?.uid;
         const hostBadge = data.isHost ? ' 👑' : '';
         const mutedIcon = data.muted ? ' 🔇' : '';
+        const cameraIcon = data.camera ? ' 📷' : '';
+        const screenIcon = data.screen ? ' 🖥️' : '';
         
         // Add special class for current user
         if (isCurrentUser) {
@@ -677,7 +695,7 @@ window.room = (function() {
                         (isCurrentUser ? '<span class="current-user-badge">(Вы)</span>' : '') +
                     '</div>' +
                     '<div class="participant-status">' +
-                        '🟢 В сети' + mutedIcon +
+                        '🟢 В сети' + mutedIcon + cameraIcon + screenIcon +
                     '</div>' +
                 '</div>' +
             '</div>' +
@@ -692,7 +710,10 @@ window.room = (function() {
             // Обновляем статус
             const statusDiv = card.querySelector('.participant-status');
             if (statusDiv) {
-                statusDiv.innerHTML = '🟢 В сети' + (data.muted ? ' 🔇' : '');
+                const mutedIcon = data.muted ? ' 🔇' : '';
+                const cameraIcon = data.camera ? ' 📷' : '';
+                const screenIcon = data.screen ? ' 🖥️' : '';
+                statusDiv.innerHTML = '🟢 В сети' + mutedIcon + cameraIcon + screenIcon;
             }
             
             // Обновляем аватар если изменился
@@ -752,11 +773,10 @@ window.room = (function() {
         
         if (currentRoom && user) {
             try {
-                // Обновляем статус в users (остаемся онлайн на сайте, но без комнаты)
+                // Обновляем статус в users
                 await db.collection('users').doc(user.uid).update({
                     currentRoom: null,
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                    // online не трогаем - пользователь все еще на сайте
                 });
 
                 const userDoc = await db.collection('users').doc(user.uid).get();
@@ -789,8 +809,18 @@ window.room = (function() {
             window.peer.cleanup();
         }
 
+        // Скрываем видео
+        if (localVideoContainer) localVideoContainer.classList.add('hidden');
+        if (localScreenContainer) localScreenContainer.classList.add('hidden');
+
         if (participantsContainer) participantsContainer.innerHTML = '';
         if (chatMessages) chatMessages.innerHTML = '';
+        
+        // Удаляем контейнеры с видео
+        const remoteVideos = document.getElementById('remoteVideosContainer');
+        const remoteScreens = document.getElementById('remoteScreensContainer');
+        if (remoteVideos) remoteVideos.innerHTML = '';
+        if (remoteScreens) remoteScreens.innerHTML = '';
         
         currentRoom = null;
         roomCode = null;
@@ -849,11 +879,10 @@ window.room = (function() {
                 participants: firebase.firestore.FieldValue.arrayRemove(userId)
             });
 
-            // Также обновляем статус в users (офлайн в комнате, но онлайн на сайте)
+            // Также обновляем статус в users
             await db.collection('users').doc(userId).update({
                 currentRoom: null,
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                // online не трогаем - может быть на сайте
             });
 
             await db.collection('rooms').doc(currentRoom).collection('messages').add({
@@ -893,12 +922,11 @@ window.room = (function() {
             const participantsSnapshot = await db.collection('rooms').doc(currentRoom).collection('participants').get();
             const batch = db.batch();
             
-            // Update each participant's user document (они остаются онлайн на сайте)
+            // Update each participant's user document
             participantsSnapshot.docs.forEach(function(participantDoc) {
                 batch.update(db.collection('users').doc(participantDoc.id), {
                     currentRoom: null,
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                    // online не трогаем
                 });
             });
 
@@ -916,6 +944,10 @@ window.room = (function() {
             // Delete ICE candidates
             const iceSnapshot = await db.collection('rooms').doc(currentRoom).collection('iceCandidates').get();
             iceSnapshot.docs.forEach(function(doc) { batch.delete(doc.ref); });
+            
+            // Delete broadcasts
+            const broadcastsSnapshot = await db.collection('rooms').doc(currentRoom).collection('broadcasts').get();
+            broadcastsSnapshot.docs.forEach(function(doc) { batch.delete(doc.ref); });
             
             // Delete the room
             batch.delete(db.collection('rooms').doc(currentRoom));
