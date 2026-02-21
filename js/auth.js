@@ -41,7 +41,7 @@ window.auth = (function() {
     const avatarPreview = document.getElementById('avatarPreview');
 
     // Initialize auth state observer
-    firebase.auth().onAuthStateChanged(async (user) => {
+    auth.onAuthStateChanged(async (user) => {
         if (user) {
             currentUser = user;
             
@@ -53,7 +53,7 @@ window.auth = (function() {
                 return;
             }
             
-            const userDoc = await db.collection('users').doc(user.uid).get();
+            const userDoc = await db.collection(AppwriteClient.usersCollectionId).doc(user.uid).get();
             
             if (userDoc.exists && userDoc.data().profileCompleted) {
                 userDisplayName = userDoc.data().displayName;
@@ -132,7 +132,7 @@ window.auth = (function() {
         if (!currentUser) return;
         
         // Загружаем актуальные данные
-        db.collection('users').doc(currentUser.uid).get().then(doc => {
+        db.collection(AppwriteClient.usersCollectionId).doc(currentUser.uid).get().then(doc => {
             if (doc.exists) {
                 loadUserSettings(doc.data());
             }
@@ -271,8 +271,8 @@ window.auth = (function() {
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
 
-            // Обновляем в Firestore
-            await db.collection('users').doc(currentUser.uid).update(newSettings);
+            // Обновляем в Appwrite
+            await db.collection(AppwriteClient.usersCollectionId).doc(currentUser.uid).update(newSettings);
 
             // Обновляем локально
             userSettings = { ...userSettings, ...newSettings };
@@ -290,7 +290,7 @@ window.auth = (function() {
             // Если в комнате, обновляем имя и аватар в participants
             if (window.room && window.room.getCurrentRoom()) {
                 const roomId = window.room.getCurrentRoom();
-                await db.collection('rooms').doc(roomId).collection('participants').doc(currentUser.uid).update({
+                await db.collection(AppwriteClient.roomsCollectionId).doc(roomId).collection('participants').doc(currentUser.uid).update({
                     displayName: newName,
                     avatar: avatarBase64
                 });
@@ -340,18 +340,18 @@ window.auth = (function() {
         if (!currentUser) return;
         
         try {
-            const userRef = db.collection('users').doc(currentUser.uid);
+            const userRef = db.collection(AppwriteClient.usersCollectionId).doc(currentUser.uid);
             
             if (online) {
                 await userRef.update({
                     online: true,
-                    lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+                    lastSeen: new Date().toISOString(),
                     status: userSettings.status || 'online'
                 });
             } else {
                 await userRef.update({
                     online: false,
-                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                    lastSeen: new Date().toISOString()
                 });
             }
             

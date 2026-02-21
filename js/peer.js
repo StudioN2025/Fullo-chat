@@ -178,7 +178,7 @@ window.peer = (function() {
             updateCameraButton();
             
             // Обновляем статус камеры в participants
-            await db.collection('rooms').doc(currentRoom).collection('participants').doc(userId).update({
+            await db.collection(AppwriteClient.roomsCollectionId).doc(currentRoom).collection('participants').doc(userId).update({
                 camera: cameraEnabled
             });
             
@@ -270,7 +270,7 @@ window.peer = (function() {
             updateScreenButton();
             
             // Обновляем статус демонстрации в participants
-            await db.collection('rooms').doc(currentRoom).collection('participants').doc(userId).update({
+            await db.collection(AppwriteClient.roomsCollectionId).doc(currentRoom).collection('participants').doc(userId).update({
                 screen: screenSharing
             });
             
@@ -302,14 +302,14 @@ window.peer = (function() {
     // Отправка сигнала конкретному участнику
     async function sendSignal(targetUserId, type, data) {
         try {
-            await db.collection('rooms').doc(currentRoom)
+            await db.collection(AppwriteClient.roomsCollectionId).doc(currentRoom)
                 .collection('signals')
                 .add({
                     from: userId,
                     target: targetUserId,
                     type: type,
                     data: data,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    timestamp: new Date().toISOString(),
                     encrypted: true
                 });
         } catch (error) {
@@ -320,13 +320,13 @@ window.peer = (function() {
     // Рассылка сигнала всем участникам
     async function broadcastSignal(type, data) {
         try {
-            await db.collection('rooms').doc(currentRoom)
+            await db.collection(AppwriteClient.roomsCollectionId).doc(currentRoom)
                 .collection('broadcasts')
                 .add({
                     from: userId,
                     type: type,
                     data: data,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    timestamp: new Date().toISOString(),
                     encrypted: true
                 });
         } catch (error) {
@@ -341,7 +341,7 @@ window.peer = (function() {
         console.log('Listening for WebRTC signaling...');
 
         // Listen for offers
-        db.collection('rooms').doc(currentRoom)
+        db.collection(AppwriteClient.roomsCollectionId).doc(currentRoom)
             .collection('signaling')
             .where('target', '==', userId)
             .onSnapshot(function(snapshot) {
@@ -349,13 +349,14 @@ window.peer = (function() {
                     if (change.type === 'added') {
                         const data = change.doc.data();
                         handleSignal(data);
+                        // Удаляем документ после обработки
                         change.doc.ref.delete().catch(console.error);
                     }
                 });
             });
 
         // Listen for ICE candidates
-        db.collection('rooms').doc(currentRoom)
+        db.collection(AppwriteClient.roomsCollectionId).doc(currentRoom)
             .collection('iceCandidates')
             .where('target', '==', userId)
             .onSnapshot(function(snapshot) {
@@ -363,13 +364,14 @@ window.peer = (function() {
                     if (change.type === 'added') {
                         const data = change.doc.data();
                         handleIceCandidate(data);
+                        // Удаляем документ после обработки
                         change.doc.ref.delete().catch(console.error);
                     }
                 });
             });
 
         // Listen for broadcast signals (camera/screen status)
-        db.collection('rooms').doc(currentRoom)
+        db.collection(AppwriteClient.roomsCollectionId).doc(currentRoom)
             .collection('broadcasts')
             .where('timestamp', '>', new Date(Date.now() - 5000))
             .onSnapshot(function(snapshot) {
@@ -379,6 +381,7 @@ window.peer = (function() {
                         if (data.from !== userId) {
                             handleBroadcast(data);
                         }
+                        // Удаляем документ после обработки
                         change.doc.ref.delete().catch(console.error);
                     }
                 });
