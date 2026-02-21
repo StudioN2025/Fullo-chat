@@ -40,26 +40,26 @@ window.room = (function() {
 
     // Проверка бана перед действиями
     async function checkBanBeforeAction() {
-        const user = firebase.auth().currentUser;
+        const user = auth.currentUser;
         if (!user) return true;
         
         try {
-            const userDoc = await db.collection('users').doc(user.uid).get();
+            const userDoc = await db.collection(AppwriteClient.usersCollectionId).doc(user.uid).get();
             if (!userDoc.exists) return false;
             
             const userData = userDoc.data();
             
             if (userData.banned) {
                 if (userData.banExpiry) {
-                    const expiryDate = userData.banExpiry.toDate();
+                    const expiryDate = new Date(userData.banExpiry);
                     if (expiryDate > new Date()) {
                         window.auth.showError('❌ Ваш аккаунт заблокирован');
-                        await firebase.auth().signOut();
+                        await auth.signOut();
                         return true;
                     }
                 } else {
                     window.auth.showError('❌ Ваш аккаунт заблокирован');
-                    await firebase.auth().signOut();
+                    await auth.signOut();
                     return true;
                 }
             }
@@ -99,7 +99,7 @@ window.room = (function() {
         // Проверяем бан перед созданием
         if (await checkBanBeforeAction()) return;
         
-        const user = firebase.auth().currentUser;
+        const user = auth.currentUser;
         if (!user) {
             window.auth.showError('Пользователь не авторизован');
             return;
@@ -109,7 +109,7 @@ window.room = (function() {
         roomCode = generateRoomCode();
         
         try {
-            const userDoc = await db.collection('users').doc(user.uid).get();
+            const userDoc = await db.collection(AppwriteClient.usersCollectionId).doc(user.uid).get();
             
             if (!userDoc.exists) {
                 window.auth.showError('Профиль пользователя не найден');
@@ -120,14 +120,14 @@ window.room = (function() {
             const avatar = userDoc.data().avatar || null;
 
             // Create room with host information
-            const roomRef = await db.collection('rooms').add({
+            const roomRef = await db.collection(AppwriteClient.roomsCollectionId).add({
                 code: roomCode,
                 hostId: user.uid,
                 hostName: displayName,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                createdAt: new Date().toISOString(),
                 participants: [user.uid],
                 active: true,
-                lastActive: firebase.firestore.FieldValue.serverTimestamp(),
+                lastActive: new Date().toISOString(),
                 createdBy: user.uid,
                 encrypted: true
             });
@@ -136,21 +136,21 @@ window.room = (function() {
             isHost = true;
 
             // Обновляем текущую комнату пользователя
-            await db.collection('users').doc(user.uid).update({
+            await db.collection(AppwriteClient.usersCollectionId).doc(user.uid).update({
                 currentRoom: currentRoom,
                 online: true,
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                lastSeen: new Date().toISOString()
             });
 
             // Add host as participant with host privileges
-            await db.collection('rooms').doc(currentRoom).collection('participants').doc(user.uid).set({
+            await db.collection(AppwriteClient.roomsCollectionId).doc(currentRoom).collection('participants').doc(user.uid).set({
                 userId: user.uid,
                 displayName: displayName,
                 avatar: avatar,
-                joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                joinedAt: new Date().toISOString(),
                 isHost: true,
                 online: true,
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+                lastSeen: new Date().toISOString(),
                 muted: false,
                 camera: false,
                 screen: false
